@@ -5,6 +5,7 @@ build/
 *.pdx
 *.pdx/
 Source/pdex.elf
+Source/pdex.dylib
 
 # CMake
 CMakeCache.txt

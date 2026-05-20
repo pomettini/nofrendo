@@ -49,17 +49,18 @@ New files created in `src/`:
 
 Goal: boots to a black screen without crashing.
 
-### Phase 3 — Display
-- [ ] Implement `display.c`: register `viddriver_t`, implement `ppu_scanline_blit`
-- [ ] Precompute luminance LUT: `luma[i] = 0.299*r + 0.587*g + 0.114*b` for all 256 palette entries
-- [ ] Bayer 4×4 dithering per pixel, written directly into the Playdate framebuffer (`pd->graphics->getDisplayBufferBitmap`)
-- [ ] Center 256×240 within 400×240 (72px left offset)
+### Phase 3 — Display ✓
+- [x] Implement `display.c`: register `viddriver_t`, implement `ppu_scanline_blit`
+- [x] Precompute luminance LUT using Rec. 601 integer approximation (`77r + 150g + 29b >> 8`)
+- [x] Bayer 4×4 dithering per pixel via `pd->graphics->getFrame()` + `markUpdatedRows`
+- [x] Center 256×240 within 400×240 (72px left offset, byte-aligned)
 
-Goal: visible NES output at whatever speed.
+Note: use `getFrame()` not `getDisplayBufferBitmap()` — the latter is a read-only copy.
 
-### Phase 4 — Input
-- [ ] Implement `keyboard.c`: poll `pd->system->getButtonState()` each frame
-- [ ] Mapping: D-pad → arrows, A → NES A, B → NES B, Menu → Start, Lock or crank click → Select
+### Phase 4 — Input ✓
+- [x] Implement `keyboard.c`: poll `pd->system->getButtonState()` each frame
+- [x] Mapping: D-pad → arrows, A → NES A, B → NES B
+- [x] Start / Select wired as Playdate system menu items (`pd->system->addMenuItem`)
 
 ### Phase 5 — Audio
 - [ ] Enable APU: add `-DAUDIO=1` to CMake, add `sndhrdw/*.c` sources

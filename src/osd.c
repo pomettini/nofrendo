@@ -13,6 +13,8 @@ static char configfilename[] = "nofrendo.cfg";
 static int playdate_update(void *ud) {
     nes_renderframe(true);
     osd_getinput();
+    pd->system->drawFPS(0, 0);
+    pd->graphics->markUpdatedRows(0, LCD_ROWS - 1);
     return 1;
 }
 
@@ -20,7 +22,10 @@ void osd_start_emulation(void) {
     pd->system->setUpdateCallback(playdate_update, NULL);
 }
 
+extern void osd_input_init(void);
+
 int osd_init(void) {
+    osd_input_init();
     return 0;
 }
 

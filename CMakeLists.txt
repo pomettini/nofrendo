@@ -53,8 +53,12 @@ set(PLATFORM_SOURCES
     src/sound.c
     src/stubs.c
     src/statefile_wrapper.c
-    src/syscalls.c
 )
+
+# Newlib syscall stubs are only needed on bare-metal device
+if (TOOLCHAIN STREQUAL "armgcc")
+    list(APPEND PLATFORM_SOURCES src/syscalls.c)
+endif()
 
 option(AUDIO "Enable NES APU" OFF)
 if (AUDIO)
