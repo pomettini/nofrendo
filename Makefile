@@ -2,7 +2,7 @@ SDK      ?= $(HOME)/Developer/PlaydateSDK
 TOOLCHAIN = $(SDK)/C_API/buildsupport/arm.cmake
 FLAGS     = -DCMAKE_BUILD_TYPE=Release -DAUDIO=ON
 
-.PHONY: all device sim clean rebuild
+.PHONY: all device sim clean rebuild diag
 
 # Build device first so pdex.elf lands in Source/ before sim runs pdc
 all: device sim
@@ -20,3 +20,9 @@ clean:
 
 rebuild:
 	touch src/*.c && $(MAKE) all
+
+diag:
+	cmake -B build/device -DTOOLCHAIN=armgcc -DCMAKE_TOOLCHAIN_FILE=$(TOOLCHAIN) $(FLAGS) -DDIAG=ON
+	cmake --build build/device
+	cmake -B build/sim $(FLAGS) -DDIAG=ON
+	cmake --build build/sim

@@ -42,6 +42,9 @@ list(FILTER NOFRENDO_CORE EXCLUDE REGEX ".*/gui\\.c$")
 list(FILTER NOFRENDO_CORE EXCLUDE REGEX ".*/gui_elem\\.c$")
 list(FILTER NOFRENDO_CORE EXCLUDE REGEX ".*/intro\\.c$")
 list(FILTER NOFRENDO_CORE EXCLUDE REGEX ".*/vid_drv\\.c$")
+# Save states removed — stubbed in stubs.c
+list(FILTER NOFRENDO_CORE EXCLUDE REGEX ".*/nesstate\\.c$")
+list(FILTER NOFRENDO_CORE EXCLUDE REGEX ".*/libsnss/.*")
 
 # Platform layer
 set(PLATFORM_SOURCES
@@ -52,14 +55,16 @@ set(PLATFORM_SOURCES
     src/timing.c
     src/sound.c
     src/stubs.c
-    src/statefile_wrapper.c
+    src/diag.c
 )
+
 
 # Newlib syscall stubs are only needed on bare-metal device
 if (TOOLCHAIN STREQUAL "armgcc")
     list(APPEND PLATFORM_SOURCES src/syscalls.c)
 endif()
 
+option(DIAG  "Enable performance diagnostics (logToConsole every 60 frames)" OFF)
 option(AUDIO "Enable NES APU" OFF)
 if (AUDIO)
     file(GLOB AUDIO_SOURCES src/nofrendo/sndhrdw/*.c)
@@ -80,6 +85,7 @@ endif()
 set(GAME_DEFINES
     NDEBUG
     $<$<BOOL:${AUDIO}>:AUDIO=1>
+    $<$<BOOL:${DIAG}>:DIAG=1>
 )
 
 # add_executable / add_library must come before including playdate_game.cmake
@@ -100,3 +106,9 @@ else()
 endif()
 
 include(${SDK}/C_API/buildsupport/playdate_game.cmake)
+
+# The SDK unconditionally adds -O2 as a PUBLIC flag, which comes after our -O3
+# and wins. Re-append -O3 here so it is the last optimisation flag on the command line.
+if (TOOLCHAIN STREQUAL "armgcc")
+    target_compile_options(${PLAYDATE_GAME_DEVICE} PRIVATE -O3)
+endif()

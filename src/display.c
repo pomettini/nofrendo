@@ -5,15 +5,9 @@
 
 extern PlaydateAPI *pd;
 
-/* NES 256x240 centred: 72px padding each side (72 is a multiple of 8) */
+/* NES 256x240 centred: 72px padding each side (divisible by 8) */
 #define XOFFSET  ((LCD_COLUMNS - NES_SCREEN_WIDTH)  / 2)
 #define YOFFSET  ((LCD_ROWS    - NES_SCREEN_HEIGHT) / 2)
-
-/* Rec. 601 luminance LUT, populated by vid_setpalette */
-static uint8_t luma[256];
-
-/* Cached raw framebuffer pointer — getFrame() is stable for the app lifetime */
-static uint8_t *fb_data = NULL;
 
 /* Bayer 4×4 ordered dither matrix, values 0–15 */
 static const uint8_t bayer4[4][4] = {
@@ -23,10 +17,40 @@ static const uint8_t bayer4[4][4] = {
     { 15,  7, 13,  5 },
 };
 
+/*
+ * white4[bayer_row][palette_index] — precomputed dither LUT.
+ *
+ * Each byte encodes whether the palette entry would render white in each of
+ * the 4 Bayer columns, packed twice so one table lookup covers both nibbles
+ * of an 8-pixel output byte:
+ *
+ *   bit 7 = col 0 (upper nibble)   bit 3 = col 0 (lower nibble)
+ *   bit 6 = col 1                  bit 2 = col 1
+ *   bit 5 = col 2                  bit 1 = col 2
+ *   bit 4 = col 3                  bit 0 = col 3
+ *
+ * Output byte for 8 consecutive pixels p[0..7] (cols 0,1,2,3,0,1,2,3):
+ *   byte = (w4[p[0]] & 0x80) | (w4[p[1]] & 0x40) | ... | (w4[p[7]] & 0x01)
+ */
+static uint8_t white4[4][256];
+
+/* Cached raw frame buffer pointer — stable for the app lifetime */
+static uint8_t *fb_data = NULL;
+
 /* Called by the PPU when it loads the colour palette */
 void vid_setpalette(rgb_t *pal) {
-    for (int i = 0; i < 256; i++)
-        luma[i] = (uint8_t)((pal[i].r * 77 + pal[i].g * 150 + pal[i].b * 29) >> 8);
+    for (int row = 0; row < 4; row++) {
+        for (int i = 0; i < 256; i++) {
+            uint8_t l = (uint8_t)((pal[i].r * 77 + pal[i].g * 150 + pal[i].b * 29) >> 8);
+            uint8_t w = 0;
+            for (int col = 0; col < 4; col++) {
+                /* Bayer threshold: scale 0–15 → 8, 24, 40 … 248 */
+                if (l >= ((bayer4[row][col] << 4) | 8))
+                    w |= (0x88u >> col);  /* sets bit(7-col) and bit(3-col) */
+            }
+            white4[row][i] = w;
+        }
+    }
 }
 
 /* Called per-scanline by nes_renderframe */
@@ -44,18 +68,16 @@ void ppu_scanline_blit(uint8_t *bmp, int scanline, bool draw_flag) {
 
     int y = scanline + YOFFSET;
     uint8_t *row = fb_data + y * LCD_ROWSIZE + XOFFSET / 8;
-    const uint8_t *th = bayer4[y & 3];
+    const uint8_t *w4 = white4[y & 3];
 
-    /* Write 32 bytes = 256 pixels, 8 per byte, MSB-first; 1=white on Playdate */
+    /* 32 bytes = 256 pixels, 8 per byte; 1 = white on Playdate (MSB first).
+       Each iteration: 8 LUT lookups + 7 OR + 8 AND — no branches. */
     for (int bx = 0; bx < NES_SCREEN_WIDTH / 8; bx++) {
-        uint8_t byte = 0;
-        for (int bit = 0; bit < 8; bit++) {
-            int px = bx * 8 + bit;
-            /* Bayer threshold: scale 0–15 → 8, 24, 40 … 248 */
-            if (luma[bmp[px]] >= ((th[px & 3] << 4) | 8))
-                byte |= (0x80 >> bit);
-        }
-        row[bx] = byte;
+        const uint8_t *px = bmp + bx * 8;
+        row[bx] = (w4[px[0]] & 0x80) | (w4[px[1]] & 0x40) |
+                  (w4[px[2]] & 0x20) | (w4[px[3]] & 0x10) |
+                  (w4[px[4]] & 0x08) | (w4[px[5]] & 0x04) |
+                  (w4[px[6]] & 0x02) | (w4[px[7]] & 0x01);
     }
 }
 

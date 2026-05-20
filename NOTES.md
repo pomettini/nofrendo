@@ -62,27 +62,28 @@ Note: use `getFrame()` not `getDisplayBufferBitmap()` — the latter is a read-o
 - [x] Mapping: D-pad → arrows, A → NES A, B → NES B
 - [x] Start / Select wired as Playdate system menu items (`pd->system->addMenuItem`)
 
-### Phase 5 — Audio
-- [ ] Enable APU: add `-DAUDIO=1` to CMake, add `sndhrdw/*.c` sources
-- [ ] Register a `pd->sound->addSource` callback
-- [ ] Implement ring buffer between APU fill and audio callback drain
-- [ ] Tune buffer size to avoid underruns without adding latency
+### Phase 5 — Audio ✓
+- [x] `-DAUDIO=ON` in Makefile, `sndhrdw/*.c` + `src/nofrendo/sndhrdw` include path added
+- [x] `pd->sound->addSource` callback registered in `osd_setsound`
+- [x] Lock-free SPSC ring buffer (4096 × int16); APU output at 22050 Hz, upsampled 2:1 to 44100 Hz
+- [x] `sound_fill_buffer` fills based on elapsed ms so audio tracks wall-clock time regardless of FPS
 
-### Phase 6 — ROM loading from SD card
-- [ ] Implement `osd_getromdata` using `pd->file->open` + `pd->file->read` to load `"cartridge.nes"` into a heap buffer
-- [ ] Implement `osd_unloadromdata` to free it
+### Phase 6 — ROM loading from SD card ✓
+- [x] `osd_getromdata` loads `"cartridge.nes"` from the bundle via `pd->file->stat` + `pd->file->open`
+- [x] `osd_unloadromdata` frees the heap buffer
 
-### Phase 7 — Performance
-Profile on hardware before optimizing. Likely bottlenecks in order:
-1. Dithering loop — consider SWAR tricks or a 4-pixel-wide LUT
-2. 6502 core — `nes6502.c` is already reasonably tight
-3. PPU rendering — scanline blit path (`ppu_scanline_blit`) avoids a full framebuffer copy; make sure it's the active path
+### Phase 7 — Performance ✓ (first pass)
+- [x] Fixed `-O3` being overridden by SDK's `-O2`: re-append `-O3` after `include(playdate_game.cmake)`
+- [x] Dithering replaced with branch-free `white4[4][256]` LUT: 8 AND+OR ops per 8 pixels, no comparisons
 
-If full 60 fps isn't achievable: implement frame-skip (render every Nth frame, still run CPU/APU every frame).
+Tested at 26 FPS on device (2048.nes). Further gains if needed:
+- Frame-skip: call `nes_renderframe(false)` on frames where `draw_flag` isn't needed (PPU skips bg/sprite fill)
+- Per-file `-Ofast` for `nes6502.c` and `nes_ppu.c` (safe — no FP in those files)
 
-### Phase 8 — Save states
-- [ ] Implement `statefile_wrapper.c` using `pd->file->open`/`read`/`write`/`close`
-- [ ] Trigger save/load on crank dock/undock or a menu option
+### Phase 8 — Save states (removed)
+Save states removed from scope. `nesstate.c` and `libsnss/` are excluded from the build;
+`state_save`/`state_load` are stubbed in `stubs.c`. SRAM battery saves (games like Zelda)
+may be added in a post-polish pass using `pd->file->open`.
 
 ### Phase 9 — Polish
 - [ ] Card art (`pdxinfo` launcher image)
