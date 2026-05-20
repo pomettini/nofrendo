@@ -1,5 +1,17 @@
 /output/
 
+# Playdate build artifacts
+build/
+*.pdx
+*.pdx/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CMakeUserPresets.json
+compile_commands.json
+
 # Claude Code
 .claude/
 CLAUDE.md
