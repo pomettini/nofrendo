@@ -320,7 +320,7 @@ void nes_nmi(void)
    nes6502_nmi();
 }
 
-static void nes_renderframe(bool draw_flag)
+void nes_renderframe(bool draw_flag)
 {
    int elapsed_cycles;
    mapintf_t *mapintf = nes.mmc->intf;
@@ -388,49 +388,14 @@ static void system_video(bool draw)
 /* main emulation loop */
 void nes_emulate(void)
 {
-   int last_ticks, frames_to_render;
-
 #if AUDIO
    osd_setsound(nes.apu->process);
 #endif
 
-   last_ticks = osd_nofrendo_ticks();
-   frames_to_render = 0;
    nes.scanline_cycles = 0;
    nes.fiq_cycles = (int) NES_FIQ_PERIOD;
 
-
-   while (false == nes.poweroff)
-   {
-      if (osd_nofrendo_ticks() != last_ticks)
-      {
-         int tick_diff = osd_nofrendo_ticks() - last_ticks;
-
-         frames_to_render += tick_diff;
-         gui_tick(tick_diff);
-         last_ticks = osd_nofrendo_ticks();
-      }
-
-      if (true == nes.pause)
-      {
-         /* TODO: dim the screen, and pause/silence the apu */
-         system_video(true);
-         frames_to_render = 0;
-      }
-      else if (frames_to_render > 1)
-      {
-         frames_to_render--;
-         nes_renderframe(false);
-         system_video(false);
-      }
-      else if ((1 == frames_to_render && true == nes.autoframeskip)
-               || false == nes.autoframeskip)
-      {
-         frames_to_render = 0;
-         nes_renderframe(true);
-         system_video(true);
-      }
-   }
+   osd_start_emulation();
 }
 
 static void mem_trash(uint8 *buffer, int length)

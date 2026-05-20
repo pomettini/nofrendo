@@ -4,6 +4,7 @@
 build/
 *.pdx
 *.pdx/
+Source/pdex.elf
 
 # CMake
 CMakeCache.txt

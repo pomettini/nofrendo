@@ -179,6 +179,7 @@ static int internal_insert(const char *filename, system_t type)
          return -1;
 
       nes_emulate();
+      console.quit = true;
       break;
 
    case system_unknown:

@@ -96,6 +96,7 @@ extern void osd_getmouse(int *x, int *y, int *button);
 extern int osd_makesnapname(char *filename, int len);
 
 extern int osd_nofrendo_ticks(void);
+extern void osd_start_emulation(void);
 
 #endif /* !NSF_PLAYER */
 

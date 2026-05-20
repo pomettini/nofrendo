@@ -51,11 +51,13 @@ typedef  unsigned short uint16;
 typedef  unsigned int   uint32;
 
 #ifndef __cplusplus
+#ifndef __bool_true_false_are_defined
 typedef enum
 {
    false = 0,
    true = 1
 } bool;
+#endif /* !__bool_true_false_are_defined */
 
 #ifndef  NULL
 #define  NULL     ((void *) 0)

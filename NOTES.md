@@ -30,13 +30,13 @@ NES emulator (Nofrendo core) port to Playdate, targeting full-speed 60 fps NTSC.
 
 ## Roadmap
 
-### Phase 1 — Build system
-- [ ] Write `CMakeLists.txt` using the Playdate SDK cmake toolchain (`PlaydateSDK/C_API/buildsupport/setup.cmake`)
-- [ ] Wire `src/nofrendo/` sources, include paths, and `-DAUDIO=1` flag
-- [ ] Verify it links (even if it crashes at runtime)
+### Phase 1 — Build system ✓
+- [x] Write `CMakeLists.txt` using the Playdate SDK cmake toolchain (`PlaydateSDK/C_API/buildsupport/setup.cmake`)
+- [x] Wire `src/nofrendo/` sources, include paths, and audio flag (cmake `-DAUDIO=ON`)
+- [ ] Verify it links (even if it crashes at runtime) — blocked on Phase 2
 
-### Phase 2 — Minimal platform layer
-New files to create in `src/`:
+### Phase 2 — Minimal platform layer ✓
+New files created in `src/`:
 
 | File | Responsibility |
 |---|---|
