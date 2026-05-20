@@ -1,1 +1,9 @@
 /output/
+
+# Claude Code
+.claude/
+CLAUDE.md
+
+# OpenAI Codex
+.codex/
+AGENTS.md
