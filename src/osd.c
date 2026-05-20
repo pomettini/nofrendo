@@ -10,9 +10,12 @@ extern PlaydateAPI *pd;
 
 static char configfilename[] = "nofrendo.cfg";
 
+extern void sound_fill_buffer(void);
+
 static int playdate_update(void *ud) {
     nes_renderframe(true);
     osd_getinput();
+    sound_fill_buffer();
     pd->system->drawFPS(0, 0);
     pd->graphics->markUpdatedRows(0, LCD_ROWS - 1);
     return 1;

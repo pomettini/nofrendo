@@ -73,6 +73,9 @@ set(GAME_INCLUDES
     src/nofrendo/libsnss
     src/nofrendo/cpu
 )
+if (AUDIO)
+    list(APPEND GAME_INCLUDES src/nofrendo/sndhrdw)
+endif()
 
 set(GAME_DEFINES
     NDEBUG

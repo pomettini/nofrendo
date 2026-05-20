@@ -1,6 +1,6 @@
 SDK      ?= $(HOME)/Developer/PlaydateSDK
 TOOLCHAIN = $(SDK)/C_API/buildsupport/arm.cmake
-FLAGS     = -DCMAKE_BUILD_TYPE=Release
+FLAGS     = -DCMAKE_BUILD_TYPE=Release -DAUDIO=ON
 
 .PHONY: all device sim clean rebuild
 
