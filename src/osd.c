@@ -15,7 +15,9 @@ extern void sound_fill_buffer(void);
 
 static int playdate_update(void *ud) {
     diag_frame_begin();
+    diag_render_begin();
     nes_renderframe(true);
+    diag_render_end();
     osd_getinput();
     sound_fill_buffer();
     diag_frame_end();

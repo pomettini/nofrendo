@@ -111,4 +111,31 @@ include(${SDK}/C_API/buildsupport/playdate_game.cmake)
 # and wins. Re-append -O3 here so it is the last optimisation flag on the command line.
 if (TOOLCHAIN STREQUAL "armgcc")
     target_compile_options(${PLAYDATE_GAME_DEVICE} PRIVATE -O3)
+
+    # nes6502_execute: -Os + switch dispatch → ~13 KB (fits Rev B 16 KB I-cache).
+    set_source_files_properties(
+        src/nofrendo/cpu/nes6502.c
+        PROPERTIES COMPILE_FLAGS "-Os -DNES6502_SWITCH"
+    )
+    # ppu_scanline is the second hottest function (~2.3 KB); -Os keeps it small
+    # so it fits alongside nes6502_execute in the 16 KB I-cache.
+    set_source_files_properties(
+        src/nofrendo/nes/nes_ppu.c
+        PROPERTIES COMPILE_FLAGS "-Os"
+    )
+
+    # Bump function alignment from SDK default 16 to 32 (one full Cortex-M7 cache line).
+    target_compile_options(${PLAYDATE_GAME_DEVICE} PRIVATE -falign-functions=32)
+
+    # Replace the SDK's linker script with our custom one, which pins nes6502_execute
+    # first in .text at a 32-byte boundary so it starts clean on a cache line.
+    get_target_property(_link_opts ${PLAYDATE_GAME_DEVICE} LINK_OPTIONS)
+    set(_sdk_ld "-T${SDK}/C_API/buildsupport/link_map.ld")
+    set(_our_ld "-T${CMAKE_CURRENT_SOURCE_DIR}/link_map.ld")
+    list(FIND _link_opts "${_sdk_ld}" _idx)
+    if(NOT _idx EQUAL -1)
+        list(REMOVE_AT _link_opts ${_idx})
+        list(INSERT _link_opts ${_idx} "${_our_ld}")
+        set_target_properties(${PLAYDATE_GAME_DEVICE} PROPERTIES LINK_OPTIONS "${_link_opts}")
+    endif()
 endif()

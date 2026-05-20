@@ -5,37 +5,54 @@
 
 extern PlaydateAPI *pd;
 
-#define WINDOW 60  /* report every N frames */
+#define WINDOW 60
 
-static uint32_t t_begin;
-static uint32_t samples[WINDOW];
-static int      idx         = 0;
-static int      total       = 0;
+static uint32_t window_start   = 0;
+static uint32_t render_start   = 0;
+static uint32_t render_accum   = 0;  /* total render ms in current window */
+static int      idx            = 0;
+static int      total          = 0;
 
 void diag_frame_begin(void) {
-    t_begin = pd->system->getCurrentTimeMilliseconds();
+    if (total == 0)
+        window_start = pd->system->getCurrentTimeMilliseconds();
+}
+
+void diag_render_begin(void) {
+    render_start = pd->system->getCurrentTimeMilliseconds();
+}
+
+void diag_render_end(void) {
+    render_accum += pd->system->getCurrentTimeMilliseconds() - render_start;
 }
 
 void diag_frame_end(void) {
-    uint32_t ms = pd->system->getCurrentTimeMilliseconds() - t_begin;
-    samples[idx++] = ms;
+    idx++;
     total++;
 
     if (idx < WINDOW) return;
     idx = 0;
 
-    uint32_t sum = 0, lo = 0xFFFFFFFF, hi = 0;
-    for (int i = 0; i < WINDOW; i++) {
-        sum += samples[i];
-        if (samples[i] < lo) lo = samples[i];
-        if (samples[i] > hi) hi = samples[i];
+    uint32_t now       = pd->system->getCurrentTimeMilliseconds();
+    uint32_t window_ms = now - window_start;
+    window_start       = now;
+
+    if (window_ms == 0) {
+        pd->system->logToConsole("[diag] frame=%-5d  fps=>1000 (window<1ms)", total);
+        render_accum = 0;
+        return;
     }
-    uint32_t avg = sum / WINDOW;
-    uint32_t fps = avg > 0 ? 1000 / avg : 0;
+
+    uint32_t fps        = (WINDOW * 1000) / window_ms;
+    uint32_t avg        = window_ms / WINDOW;
+    uint32_t avg_render = render_accum / WINDOW;
+    uint32_t avg_other  = avg > avg_render ? avg - avg_render : 0;
 
     pd->system->logToConsole(
-        "[diag] frame=%-5d  fps=%2d  avg=%2dms  min=%2dms  max=%2dms",
-        total, fps, avg, lo, hi);
+        "[diag] frame=%-5d  fps=%3d  avg=%2dms  (render=%2dms  other=%2dms)",
+        total, fps, avg, avg_render, avg_other);
+
+    render_accum = 0;
 }
 
 #endif /* DIAG */

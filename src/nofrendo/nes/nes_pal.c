@@ -145,11 +145,11 @@ void pal_generate(void)
             break;
          }
 
-         theta = (float) (PI * ((col_angles[z] + hue) / 180.0));
+         theta = (float) (PI * ((col_angles[z] + hue) / 180.0f));
 
-         r = (int) (256.0 * (y + s * sin(theta)));
-         g = (int) (256.0 * (y - ((27 / 53.0) * s * sin(theta)) + ((10 / 53.0) * s * cos(theta))));
-         b = (int) (256.0 * (y - (s * cos(theta))));
+         r = (int) (256.0f * (y + s * sinf(theta)));
+         g = (int) (256.0f * (y - ((27 / 53.0f) * s * sinf(theta)) + ((10 / 53.0f) * s * cosf(theta))));
+         b = (int) (256.0f * (y - (s * cosf(theta))));
 
          if (r > 255)
             r = 255;

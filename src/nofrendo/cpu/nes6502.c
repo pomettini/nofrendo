@@ -31,7 +31,9 @@
 //#define  NES6502_DISASM
 
 #ifdef __GNUC__
+#ifndef NES6502_SWITCH
 #define  NES6502_JUMPTABLE
+#endif
 #endif /* __GNUC__ */
 
 
