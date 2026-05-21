@@ -211,6 +211,12 @@ uint8 *ppu_getpage(int page)
 static uint8 oam_sl_count[NES_SCREEN_HEIGHT];              /* sprites per scanline      */
 static uint8 oam_sl_idx[NES_SCREEN_HEIGHT][PPU_MAXSPRITE]; /* sprite indices, in order  */
 
+/* Sprite pattern cache — pre-decoded CHR data (pat1+pat2) for all 64 sprites × 16 rows.
+   Rebuilt alongside the scanline cache.  Eliminates PPU_MEM() calls and CHR D-cache
+   pressure inside the hot ppu_renderoam scanline loop. 2 KB total. */
+static uint8 oam_pat1[64][16]; /* bitplane 0 for each sprite row */
+static uint8 oam_pat2[64][16]; /* bitplane 1 for each sprite row */
+
 static void mem_trash(uint8 *buffer, int length)
 {
    int i;
@@ -799,17 +805,40 @@ static void ppu_build_sprite_cache(void)
 
    for (int s = 0; s < 64; s++, sp++)
    {
+      /* scanline index */
       int y0 = (int)sp->y_loc + 1;
-      if (y0 <= 0 || y0 >= NES_SCREEN_HEIGHT) continue;
-      int y1 = y0 + h;
-      if (y1 > NES_SCREEN_HEIGHT) y1 = NES_SCREEN_HEIGHT;
-
-      for (int y = y0; y < y1; y++)
+      if (y0 > 0 && y0 < NES_SCREEN_HEIGHT)
       {
-         uint8 cnt = oam_sl_count[y];
-         if (cnt < PPU_MAXSPRITE)
-            oam_sl_idx[y][cnt] = (uint8)s;
-         oam_sl_count[y] = cnt + 1;
+         int y1 = y0 + h;
+         if (y1 > NES_SCREEN_HEIGHT) y1 = NES_SCREEN_HEIGHT;
+         for (int y = y0; y < y1; y++)
+         {
+            uint8 cnt = oam_sl_count[y];
+            if (cnt < PPU_MAXSPRITE)
+               oam_sl_idx[y][cnt] = (uint8)s;
+            oam_sl_count[y] = cnt + 1;
+         }
+      }
+
+      /* pattern cache — pre-decode CHR bitplanes for all rows of this sprite */
+      uint8 tile  = sp->tile;
+      uint8 attrib = sp->atr;
+      bool  vflip = (attrib & OAMF_VFLIP) != 0;
+
+      uint32 vram_adr;
+      if (16 == h)
+         vram_adr = ((tile & 1) << 12) | ((tile & 0xFE) << 4);
+      else
+         vram_adr = ppu.obj_base + ((uint32)tile << 4);
+
+      for (int row = 0; row < h; row++)
+      {
+         int src = vflip ? (h - 1 - row) : row;
+         /* For 8×16: second tile starts 16 bytes after first in CHR ROM */
+         uint32 chr_off = (src > 7) ? (16 + (src & 7)) : src;
+         uint8 *dp = &PPU_MEM(vram_adr + chr_off);
+         oam_pat1[s][row] = dp[0];
+         oam_pat2[s][row] = dp[8];
       }
    }
 }
@@ -829,8 +858,7 @@ static void ppu_renderoam(uint8 *vidbuf, int scanline)
       savecol[1] = ((uint32 *) buf_ptr)[1];
    }
 
-   uint8 sprite_height = ppu.obj_height;
-   uint32 vram_offset  = ppu.obj_base;
+   uint8 sprite_height __attribute__((unused)) = ppu.obj_height;
 
    /* Use the precomputed sprite cache — O(visible sprites) instead of O(64) */
    int total = oam_sl_count[scanline];
@@ -855,33 +883,16 @@ static void ppu_renderoam(uint8 *vidbuf, int scanline)
       uint8 *bmp_ptr = buf_ptr + sprite_x;
 
       if (ppu.latchfunc)
-         ppu.latchfunc(vram_offset, tile_index);
+         ppu.latchfunc(ppu.obj_base, tile_index);
 
       uint8 col_high = (attrib & 3) << 2;
 
-      uint32 vram_adr;
-      if (16 == sprite_height)
-         vram_adr = ((tile_index & 1) << 12) | ((tile_index & 0xFE) << 4);
-      else
-         vram_adr = vram_offset + (tile_index << 4);
-
-      uint8 *data_ptr = &PPU_MEM(vram_adr);
-
-      int y_offset = scanline - sprite_y;
-      if (y_offset > 7) y_offset += 8;
-
-      if (attrib & OAMF_VFLIP)
-      {
-         y_offset -= (16 == sprite_height) ? 23 : 7;
-         data_ptr -= y_offset;
-      }
-      else
-      {
-         data_ptr += y_offset;
-      }
-
+      /* CHR data from pre-decoded pattern cache — no PPU_MEM() access here */
+      int sprite_row = scanline - sprite_y;
       bool check_strike = (sprite_num == 0) && (false == ppu.strikeflag);
-      int strike_pixel = draw_oamtile(bmp_ptr, attrib, data_ptr[0], data_ptr[8],
+      int strike_pixel = draw_oamtile(bmp_ptr, attrib,
+                                      oam_pat1[sprite_num][sprite_row],
+                                      oam_pat2[sprite_num][sprite_row],
                                       ppu.palette + 16 + col_high, check_strike);
       if (strike_pixel >= 0)
          ppu_setstrike(strike_pixel);
