@@ -1027,13 +1027,17 @@ static void ppu_renderscanline(uint8_t *buf, int scanline, bool draw_flag)
       }
    }
 
+#ifndef DISABLE_PPU_BG
    if (draw_flag)
       ppu_renderbg(buf);
+#endif
 
    /* TODO: fetch obj data 1 scanline before */
+#ifndef DISABLE_PPU_SPRITES
    if (true == ppu.drawsprites && true == draw_flag)
       ppu_renderoam(buf, scanline);
    else
+#endif
       ppu_fakeoam(scanline);
 }
 

@@ -59,7 +59,49 @@ Frame skip ceiling: even with every frame skipped (no pixel rendering), FPS is b
 by `1000 / 24 ms ≈ 41 fps`. Reaching 50 fps (PAL target) requires speeding up the
 6502 core itself — frame skip alone is not sufficient.
 
-Target: 50 fps (PAL NES speed). Current best with frame skip: **~31 fps**.
+**Clean measured breakdown (FRAME_SKIP=999 test, 2026-05-21):**
+
+| Component | Cost | How measured |
+|---|---:|---|
+| `render_false` (6502 + PPU state, no pixels) | **22 ms** | FRAME_SKIP=999 direct |
+| PPU pixel rendering (sprites + BG + blit) | **8 ms** | render_true − render_false |
+| `render_true` (full frame) | **30 ms** | derived |
+| `sound_fill_buffer` | **2 ms** | in `other` |
+
+Frame skip ceiling: `1000 / 22ms ≈ 45 fps` — never achievable with frame skip alone.
+50 fps requires `render_false < 16ms` → 27% speedup of the 6502 core.
+
+Current best: **FRAME_SKIP=1, ~30 fps** (every frame rendered, smooth 30fps display).
+
+---
+
+## Profiling matrix — Super Mario Bros 1-1 (standardised scene)
+
+All measurements: device, Mario ROM, standing at start of 1-1, `FRAME_SKIP=2`, `AUDIO=ON`.
+`render` = average of render-true and render-false over 60-frame window.
+
+⚠️ **cmake cache contamination warning:** `PPU_SPRITES=OFF` and `PPU_BG=OFF` from
+`make diag-nosprites`/`make diag-nobg` persist in the cmake cache unless `FLAGS` in
+the Makefile explicitly passes `-DPPU_BG=ON -DPPU_SPRITES=ON`. Fixed. Remeasure after
+any cache-polluting build.
+
+| Build config | fps | render | other | delta vs baseline | true cost |
+|---|---:|---:|---:|---:|---|
+| Baseline (all on, corrected) | 33 | 27 ms | 3 ms | — | reference |
+| `DISABLE_PPU_BG` | — | — | — | needs remeasure |
+| `DISABLE_PPU_SPRITES` | — | — | — | needs remeasure |
+| `AUDIO=OFF` | — | — | — | needs remeasure |
+
+Previous matrix measurements were taken while `PPU_SPRITES=OFF` leaked from cmake cache —
+those numbers are invalidated and need to be redone with the fixed Makefile.
+
+Known reliable facts (no-audio was taken from a different session, believed clean):
+- Removing audio drops `render` by ~6 ms and `other` by ~3 ms → **APU total ≈ 9 ms/frame**
+- APU sample generation runs every frame (render-true AND render-false), not just on draw frames
+
+**Path to 50 fps (PAL target) with `FRAME_SKIP=2` — need avg render ≤ 20 ms:**
+- Cut APU cost in half → saves ~3 ms avg → 24 ms → 41 fps
+- APU + 6502 core improvements needed for 50 fps
 
 ---
 
@@ -134,6 +176,22 @@ nes_renderframe   0x0000_8bXX      312 B
 ---
 
 ## Optimisations tried that had no measurable effect
+
+### PC host-pointer opcode fetch (`NES6502_PC_PTR`)
+Replaced `bank_readbyte(PC++)` in the opcode dispatch with `*pc_ptr++` (direct pointer
+into the current PRG bank). Added `PC_REBASE()` at every non-sequential PC change
+(branches taken, JMP, JSR, RTS, RTI, BRK, NMI, IRQ). Kept `bank_readbyte` for operand
+reads, only synced `pc_ptr` alongside `PC` in `IMMEDIATE_BYTE`, `ABSOLUTE_ADDR`, etc.
+
+**Result: no measurable improvement.** render stayed at ~27 ms with the flag enabled.
+The theoretical saving (~2 ARM cycles per opcode dispatch) is real but too small to
+measure at 1 ms timer resolution (~0.2 ms/frame theoretical max). With `-Os`,
+the compiler does not keep `pc_ptr` in a register across the 256-case switch body, so
+the pointer must be reloaded on each dispatch anyway, eliminating the win.
+
+The infrastructure is still in the code (`NES6502_PC_PTR` flag in `nes6502.c`) but
+disabled in `CMakeLists.txt`. To re-enable for future experiments with a different
+optimisation level, add `-DNES6502_PC_PTR` back to `nes6502.c`'s `COMPILE_FLAGS`.
 
 ### OAM sprite list precomputation (2024-05)
 `ppu_renderoam` previously iterated all 64 OAM sprites per scanline (262 × 64 = 16,768

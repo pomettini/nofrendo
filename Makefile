@@ -1,6 +1,6 @@
 SDK      ?= $(HOME)/Developer/PlaydateSDK
 TOOLCHAIN = $(SDK)/C_API/buildsupport/arm.cmake
-FLAGS     = -DCMAKE_BUILD_TYPE=Release -DAUDIO=ON
+FLAGS     = -DCMAKE_BUILD_TYPE=Release -DAUDIO=ON -DDIAG=OFF -DPPU_BG=ON -DPPU_SPRITES=ON
 PDUTIL    = $(SDK)/bin/pdutil
 PORT      ?= $(shell ls /dev/cu.usbmodem* 2>/dev/null | head -1)
 VOLUME    ?= /Volumes/PLAYDATE
@@ -28,6 +28,26 @@ diag:
 	cmake -B build/device -DTOOLCHAIN=armgcc -DCMAKE_TOOLCHAIN_FILE=$(TOOLCHAIN) $(FLAGS) -DDIAG=ON
 	cmake --build build/device
 	cmake -B build/sim $(FLAGS) -DDIAG=ON
+	cmake --build build/sim
+
+# Profiling matrix targets — build diag with one subsystem disabled at a time.
+# Usage: make diag-nobg / diag-nosprites / diag-noaudio, then make install-diag.
+diag-nobg:
+	cmake -B build/device -DTOOLCHAIN=armgcc -DCMAKE_TOOLCHAIN_FILE=$(TOOLCHAIN) $(FLAGS) -DDIAG=ON -DPPU_BG=OFF
+	cmake --build build/device
+	cmake -B build/sim $(FLAGS) -DDIAG=ON -DPPU_BG=OFF
+	cmake --build build/sim
+
+diag-nosprites:
+	cmake -B build/device -DTOOLCHAIN=armgcc -DCMAKE_TOOLCHAIN_FILE=$(TOOLCHAIN) $(FLAGS) -DDIAG=ON -DPPU_SPRITES=OFF
+	cmake --build build/device
+	cmake -B build/sim $(FLAGS) -DDIAG=ON -DPPU_SPRITES=OFF
+	cmake --build build/sim
+
+diag-noaudio:
+	cmake -B build/device -DTOOLCHAIN=armgcc -DCMAKE_TOOLCHAIN_FILE=$(TOOLCHAIN) $(FLAGS) -DDIAG=ON -DAUDIO=OFF
+	cmake --build build/device
+	cmake -B build/sim $(FLAGS) -DDIAG=ON -DAUDIO=OFF
 	cmake --build build/sim
 
 _push:

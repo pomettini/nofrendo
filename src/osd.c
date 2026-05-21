@@ -16,7 +16,7 @@ extern void sound_fill_buffer(void);
 /* Render 1 out of every FRAME_SKIP NES frames. 1 = no skip (full render
    every frame). 2 = render every other frame (halves PPU pixel cost).
    Skipped frames still run the 6502 and PPU state machine at full speed. */
-#define FRAME_SKIP 3
+#define FRAME_SKIP 2
 
 static int frame_num = 0;
 

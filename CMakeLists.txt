@@ -64,8 +64,10 @@ if (TOOLCHAIN STREQUAL "armgcc")
     list(APPEND PLATFORM_SOURCES src/syscalls.c)
 endif()
 
-option(DIAG  "Enable performance diagnostics (logToConsole every 60 frames)" OFF)
-option(AUDIO "Enable NES APU" OFF)
+option(DIAG        "Enable performance diagnostics (logToConsole every 60 frames)" OFF)
+option(AUDIO       "Enable NES APU" OFF)
+option(PPU_BG      "Enable PPU background rendering (OFF to measure cost)" ON)
+option(PPU_SPRITES "Enable PPU sprite rendering (OFF to measure cost)" ON)
 if (AUDIO)
     file(GLOB AUDIO_SOURCES src/nofrendo/sndhrdw/*.c)
     list(APPEND NOFRENDO_CORE ${AUDIO_SOURCES})
@@ -82,10 +84,15 @@ if (AUDIO)
     list(APPEND GAME_INCLUDES src/nofrendo/sndhrdw)
 endif()
 
+string(TIMESTAMP BUILD_TIMESTAMP "%Y-%m-%d %H:%M:%S")
+
 set(GAME_DEFINES
     NDEBUG
     $<$<BOOL:${AUDIO}>:AUDIO=1>
     $<$<BOOL:${DIAG}>:DIAG=1>
+    $<$<BOOL:${DIAG}>:BUILD_TIMESTAMP="${BUILD_TIMESTAMP}">
+    $<$<NOT:$<BOOL:${PPU_BG}>>:DISABLE_PPU_BG=1>
+    $<$<NOT:$<BOOL:${PPU_SPRITES}>>:DISABLE_PPU_SPRITES=1>
 )
 
 # add_executable / add_library must come before including playdate_game.cmake
@@ -115,7 +122,7 @@ if (TOOLCHAIN STREQUAL "armgcc")
     # nes6502_execute: -Os + switch dispatch → ~13 KB (fits Rev B 16 KB I-cache).
     set_source_files_properties(
         src/nofrendo/cpu/nes6502.c
-        PROPERTIES COMPILE_FLAGS "-Os -DNES6502_SWITCH"
+        PROPERTIES COMPILE_FLAGS "-O2 -DNES6502_SWITCH -DNES6502_LEGAL_ONLY"
     )
     # nes_ppu.c stays at -O3: ppu_scanline (2.3 KB) already fits alongside
     # nes6502_execute in the 16 KB I-cache, so -Os would only make it slower.

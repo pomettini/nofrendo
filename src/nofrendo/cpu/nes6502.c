@@ -43,6 +43,30 @@
    cpu.total_cycles += (x); \
 }
 
+/* PC host-pointer fast path.
+** pc_ptr caches mem_page[PC>>12]+(PC&0xFFF), eliminating the double indirection
+** on every sequential opcode/operand fetch.  Must call PC_REBASE() after any
+** non-sequential PC change (branch taken, jump, JSR, RTS, RTI, NMI, IRQ). */
+#ifdef NES6502_PC_PTR
+#define NES6502_PC_PTR_LOCALS  uint8 *pc_ptr = NULL, *pc_bank_end = NULL;
+#define PC_REBASE() \
+{ \
+   pc_ptr      = cpu.mem_page[PC >> NES6502_BANKSHIFT] + (PC & NES6502_BANKMASK); \
+   pc_bank_end = cpu.mem_page[PC >> NES6502_BANKSHIFT] + NES6502_BANKSIZE; \
+}
+/* Sequential PC advances — keep pc_ptr in sync, no per-step boundary check.
+   The single pre-dispatch check handles the rare sequential bank crossing. */
+#define PC_SKIP_1() { pc_ptr++; PC++; }
+#define PC_SKIP_2() { pc_ptr += 2; PC += 2; }
+#define PC_DEC_1()  { pc_ptr--; PC--; }
+#else
+#define NES6502_PC_PTR_LOCALS
+#define PC_REBASE()
+#define PC_SKIP_1() { PC++; }
+#define PC_SKIP_2() { PC += 2; }
+#define PC_DEC_1()  { PC--; }
+#endif
+
 /*
 ** Check to see if an index reg addition overflowed to next page
 */
@@ -59,17 +83,34 @@
 */
 
 /* Immediate */
+#ifdef NES6502_PC_PTR
+#define IMMEDIATE_BYTE(value) \
+{ \
+   (value) = bank_readbyte(PC++); \
+   pc_ptr++; \
+}
+#else
 #define IMMEDIATE_BYTE(value) \
 { \
    value = bank_readbyte(PC++); \
 }
+#endif
 
 /* Absolute */
+#ifdef NES6502_PC_PTR
+#define ABSOLUTE_ADDR(address) \
+{ \
+   address = bank_readword(PC); \
+   pc_ptr += 2; \
+   PC += 2; \
+}
+#else
 #define ABSOLUTE_ADDR(address) \
 { \
    address = bank_readword(PC); \
    PC += 2; \
 }
+#endif
 
 #define ABSOLUTE(address, value) \
 { \
@@ -276,6 +317,27 @@
 #define  SET_NZ_FLAGS(value)     n_flag = z_flag = (value);
 
 /* For BCC, BCS, BEQ, BMI, BNE, BPL, BVC, BVS */
+#ifdef NES6502_PC_PTR
+#define RELATIVE_BRANCH(condition) \
+{ \
+   if (condition) \
+   { \
+      IMMEDIATE_BYTE(btemp); \
+      if (((int8) btemp + (PC & 0x00FF)) & 0x100) \
+         ADD_CYCLES(1); \
+      ADD_CYCLES(3); \
+      PC += (int8) btemp; \
+      PC_REBASE(); \
+   } \
+   else \
+   { \
+      pc_ptr++; \
+      PC++; \
+      if (__builtin_expect(pc_ptr >= pc_bank_end, 0)) PC_REBASE(); \
+      ADD_CYCLES(2); \
+   } \
+}
+#else
 #define RELATIVE_BRANCH(condition) \
 { \
    if (condition) \
@@ -292,10 +354,12 @@
       ADD_CYCLES(2); \
    } \
 }
+#endif
 
 #define JUMP(address) \
 { \
    PC = bank_readword((address)); \
+   PC_REBASE(); \
 }
 
 /*
@@ -518,7 +582,7 @@
 /* Software interrupt type thang */
 #define BRK() \
 { \
-   PC++; \
+   PC_SKIP_1(); \
    PUSH(PC >> 8); \
    PUSH(PC & 0xFF); \
    b_flag = 1; \
@@ -632,7 +696,7 @@
 /* undocumented (double-NOP) */
 #define DOP(cycles) \
 { \
-   PC++; \
+   PC_SKIP_1(); \
    ADD_CYCLES(cycles); \
 }
 
@@ -685,7 +749,7 @@
 #else /* !NES6502_TESTOPS */
 #define JAM() \
 { \
-   PC--; \
+   PC_DEC_1(); \
    cpu.jammed = true; \
    cpu.int_pending = 0; \
    ADD_CYCLES(2); \
@@ -696,10 +760,12 @@
 { \
    temp = bank_readword(PC); \
    /* bug in crossing page boundaries */ \
-   if (0xFF == (temp & 0xFF)) \
+   if (0xFF == (temp & 0xFF)) { \
       PC = (bank_readbyte(temp & 0xFF00) << 8) | bank_readbyte(temp); \
-   else \
+      PC_REBASE(); \
+   } else { \
       JUMP(temp); \
+   } \
    ADD_CYCLES(5); \
 }
 
@@ -711,7 +777,7 @@
 
 #define JSR() \
 { \
-   PC++; \
+   PC_SKIP_1(); \
    PUSH(PC >> 8); \
    PUSH(PC & 0xFF); \
    JUMP(PC - 1); \
@@ -895,6 +961,7 @@
    SCATTER_FLAGS(btemp); \
    PC = PULL(); \
    PC |= PULL() << 8; \
+   PC_REBASE(); \
    ADD_CYCLES(6); \
    if (0 == i_flag && cpu.int_pending && remaining_cycles > 0) \
    { \
@@ -908,6 +975,7 @@
 { \
    PC = PULL(); \
    PC = (PC | (PULL() << 8)) + 1; \
+   PC_REBASE(); \
    ADD_CYCLES(6); \
 }
 
@@ -1099,7 +1167,7 @@
 /* undocumented (triple-NOP) */
 #define TOP() \
 { \
-   PC += 2; \
+   PC_SKIP_2(); \
    ADD_CYCLES(4); \
 }
 
@@ -1361,6 +1429,46 @@ uint32 nes6502_getcycles(bool reset_flag)
 #endif /* !NES6502_JUMPTABLE */
 
 
+/* NES6502_LEGAL_ONLY: replace all undocumented opcodes with cycle-accurate stubs.
+** SMB and most common games never execute these. Shrinks the switch body by ~2 KB,
+** giving the compiler more room to allocate registers and improving I-cache density. */
+#ifdef NES6502_LEGAL_ONLY
+#undef  ANC
+#define ANC(cycles, ...)  ADD_CYCLES(cycles)
+#undef  ANE
+#define ANE(cycles, ...)  ADD_CYCLES(cycles)
+#undef  ARR
+#define ARR(cycles, ...)  ADD_CYCLES(cycles)
+#undef  ASR
+#define ASR(cycles, ...)  ADD_CYCLES(cycles)
+#undef  DCP
+#define DCP(cycles, ...)  ADD_CYCLES(cycles)
+#undef  ISB
+#define ISB(cycles, ...)  ADD_CYCLES(cycles)
+#undef  LAS
+#define LAS(cycles, ...)  ADD_CYCLES(cycles)
+#undef  LAX
+#define LAX(cycles, ...)  ADD_CYCLES(cycles)
+#undef  LXA
+#define LXA(cycles, ...)  ADD_CYCLES(cycles)
+#undef  RLA
+#define RLA(cycles, ...)  ADD_CYCLES(cycles)
+#undef  RRA
+#define RRA(cycles, ...)  ADD_CYCLES(cycles)
+#undef  SAX
+#define SAX(cycles, ...)  ADD_CYCLES(cycles)
+#undef  SHA
+#define SHA(cycles, ...)  ADD_CYCLES(cycles)
+#undef  SHX
+#define SHX(cycles, ...)  ADD_CYCLES(cycles)
+#undef  SHY
+#define SHY(cycles, ...)  ADD_CYCLES(cycles)
+#undef  SLO
+#define SLO(cycles, ...)  ADD_CYCLES(cycles)
+#undef  SRE
+#define SRE(cycles, ...)  ADD_CYCLES(cycles)
+#endif /* NES6502_LEGAL_ONLY */
+
 /* Execute instructions until count expires
 **
 ** Returns the number of cycles *actually* executed, which will be
@@ -1381,6 +1489,7 @@ int nes6502_execute(int timeslice_cycles)
    /* local copies of regs */
    uint32 PC;
    uint8 A, X, Y, S;
+   NES6502_PC_PTR_LOCALS
 
 #ifdef NES6502_JUMPTABLE
 
@@ -1425,6 +1534,7 @@ int nes6502_execute(int timeslice_cycles)
    remaining_cycles = timeslice_cycles;
 
    GET_GLOBAL_REGS();
+   PC_REBASE();
 
    /* check for DMA cycle burning */
    if (cpu.burn_cycles && remaining_cycles > 0)
@@ -1457,8 +1567,18 @@ int nes6502_execute(int timeslice_cycles)
 #endif /* NES6502_DISASM */
 
       /* Fetch and execute instruction */
+#ifdef NES6502_PC_PTR
+      {
+         uint8 _op;
+         if (__builtin_expect(pc_ptr >= pc_bank_end, 0)) PC_REBASE();
+         _op = *pc_ptr++;
+         PC++;
+         switch (_op)
+         {
+#else
       switch (bank_readbyte(PC++))
       {
+#endif /* NES6502_PC_PTR */
 #endif /* !NES6502_JUMPTABLE */
 
       OPCODE_BEGIN(00)  /* BRK */
@@ -2393,6 +2513,9 @@ end_execute:
 
 #else /* !NES6502_JUMPTABLE */
       }
+#ifdef NES6502_PC_PTR
+      } /* close the extra block opened for _op */
+#endif
    }
 #endif /* !NES6502_JUMPTABLE */
 
@@ -2422,7 +2545,8 @@ void nes6502_reset(void)
    uint32 PC; \
    uint8 A, X, Y, S; \
    uint8 n_flag, v_flag, b_flag; \
-   uint8 d_flag, i_flag, z_flag, c_flag;
+   uint8 d_flag, i_flag, z_flag, c_flag; \
+   NES6502_PC_PTR_LOCALS
 
 /* Non-maskable interrupt */
 void nes6502_nmi(void)

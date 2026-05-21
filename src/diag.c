@@ -18,7 +18,7 @@ static bool     initialized   = false;
 
 void diag_frame_begin(void) {
     if (!initialized) {
-        pd->system->logToConsole("[diag] build=" __DATE__ " " __TIME__);
+        pd->system->logToConsole("[diag] build=" BUILD_TIMESTAMP);
         window_start = pd->system->getCurrentTimeMilliseconds();
         initialized  = true;
     }
