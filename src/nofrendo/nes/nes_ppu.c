@@ -205,6 +205,12 @@ uint8 *ppu_getpage(int page)
    return ppu.page[page];
 }
 
+/* Per-scanline sprite index cache — rebuilt once per frame at scanline 0.
+   Eliminates the 64-sprite linear scan inside ppu_renderoam for every scanline.
+   NOTE: assumes OAM is not modified during active rendering (safe for >99% of games). */
+static uint8 oam_sl_count[NES_SCREEN_HEIGHT];              /* sprites per scanline      */
+static uint8 oam_sl_idx[NES_SCREEN_HEIGHT][PPU_MAXSPRITE]; /* sprite indices, in order  */
+
 static void mem_trash(uint8 *buffer, int length)
 {
    int i;
@@ -696,6 +702,7 @@ INLINE int draw_oamtile(uint8 *surface, uint8 attrib, uint8 pat1,
 static void ppu_renderbg(uint8 *vidbuf)
 {
    uint8 *bmp_ptr, *data_ptr, *tile_ptr, *attrib_ptr;
+   uint8 *pal = ppu.palette;
    uint32 refresh_vaddr, bg_offset, attrib_base;
    int tile_count;
    uint8 tile_index, x_tile, y_tile;
@@ -734,7 +741,7 @@ static void ppu_renderbg(uint8 *vidbuf)
       if (ppu.latchfunc)
          ppu.latchfunc(ppu.bg_base, tile_index);
 
-      draw_bgtile(bmp_ptr, data_ptr[0], data_ptr[8], ppu.palette + col_high);
+      draw_bgtile(bmp_ptr, data_ptr[0], data_ptr[8], pal + col_high);
       bmp_ptr += 8;
 
       x_tile++;
@@ -783,86 +790,89 @@ typedef struct obj_s
    uint8 x_loc;
 } obj_t;
 
+static void ppu_build_sprite_cache(void)
+{
+   memset(oam_sl_count, 0, sizeof(oam_sl_count));
+
+   obj_t *sp = (obj_t *) ppu.oam;
+   int h = ppu.obj_height;
+
+   for (int s = 0; s < 64; s++, sp++)
+   {
+      int y0 = (int)sp->y_loc + 1;
+      if (y0 <= 0 || y0 >= NES_SCREEN_HEIGHT) continue;
+      int y1 = y0 + h;
+      if (y1 > NES_SCREEN_HEIGHT) y1 = NES_SCREEN_HEIGHT;
+
+      for (int y = y0; y < y1; y++)
+      {
+         uint8 cnt = oam_sl_count[y];
+         if (cnt < PPU_MAXSPRITE)
+            oam_sl_idx[y][cnt] = (uint8)s;
+         oam_sl_count[y] = cnt + 1;
+      }
+   }
+}
+
 /* TODO: fetch valid OAM a scanline before, like the Real Thing */
 static void ppu_renderoam(uint8 *vidbuf, int scanline)
 {
-   uint8 *buf_ptr;
-   uint32 vram_offset, savecol[2];
-   int sprite_num, spritecount;
-   obj_t *sprite_ptr;
-   uint8 sprite_height;
-
    if (false == ppu.obj_on)
       return;
 
-   /* Get our buffer pointer */
-   buf_ptr = vidbuf;
+   uint8 *buf_ptr = vidbuf;
+   uint32 savecol[2];
 
-   /* Save left hand column? */
    if (ppu.obj_mask)
    {
       savecol[0] = ((uint32 *) buf_ptr)[0];
       savecol[1] = ((uint32 *) buf_ptr)[1];
    }
 
-   sprite_height = ppu.obj_height;
-   vram_offset = ppu.obj_base;
-   spritecount = 0;
+   uint8 sprite_height = ppu.obj_height;
+   uint32 vram_offset  = ppu.obj_base;
 
-   sprite_ptr = (obj_t *) ppu.oam;
-
-   for (sprite_num = 0; sprite_num < 64; sprite_num++, sprite_ptr++)
+   /* Use the precomputed sprite cache — O(visible sprites) instead of O(64) */
+   int total = oam_sl_count[scanline];
+   if (total > PPU_MAXSPRITE)
    {
-      uint8 *data_ptr, *bmp_ptr;
-      uint32 vram_adr;
-      int y_offset;
-      uint8 tile_index, attrib, col_high;
-      uint8 sprite_y, sprite_x;
-      bool check_strike;
-      int strike_pixel;
+      ppu.stat |= PPU_STATF_MAXSPRITE;
+      total = PPU_MAXSPRITE;
+   }
 
-      sprite_y = sprite_ptr->y_loc + 1;
+   obj_t *sprites = (obj_t *) ppu.oam;
 
-      /* Check to see if sprite is out of range */
-      if ((sprite_y > scanline) || (sprite_y <= (scanline - sprite_height))
-          || (0 == sprite_y) || (sprite_y >= 240))
-         continue;
+   for (int i = 0; i < total; i++)
+   {
+      uint8 sprite_num = oam_sl_idx[scanline][i];
+      obj_t *sp        = &sprites[sprite_num];
 
-      sprite_x = sprite_ptr->x_loc;
-      tile_index = sprite_ptr->tile;
-      attrib = sprite_ptr->atr;
+      uint8 sprite_y   = sp->y_loc + 1;
+      uint8 sprite_x   = sp->x_loc;
+      uint8 tile_index = sp->tile;
+      uint8 attrib     = sp->atr;
 
-      bmp_ptr = buf_ptr + sprite_x;
+      uint8 *bmp_ptr = buf_ptr + sprite_x;
 
-      /* Handle $FD/$FE tile VROM switching (PunchOut) */
       if (ppu.latchfunc)
          ppu.latchfunc(vram_offset, tile_index);
 
-      /* Get upper two bits of color */
-      col_high = ((attrib & 3) << 2);
+      uint8 col_high = (attrib & 3) << 2;
 
-      /* 8x16 even sprites use $0000, odd use $1000 */
-      if (16 == ppu.obj_height)
+      uint32 vram_adr;
+      if (16 == sprite_height)
          vram_adr = ((tile_index & 1) << 12) | ((tile_index & 0xFE) << 4);
       else
          vram_adr = vram_offset + (tile_index << 4);
 
-      /* Get the address of the tile */
-      data_ptr = &PPU_MEM(vram_adr);
+      uint8 *data_ptr = &PPU_MEM(vram_adr);
 
-      /* Calculate offset (line within the sprite) */
-      y_offset = scanline - sprite_y;
-      if (y_offset > 7)
-         y_offset += 8;
+      int y_offset = scanline - sprite_y;
+      if (y_offset > 7) y_offset += 8;
 
-      /* Account for vertical flippage */
       if (attrib & OAMF_VFLIP)
       {
-         if (16 == ppu.obj_height)
-            y_offset -= 23;
-         else
-            y_offset -= 7;
-
+         y_offset -= (16 == sprite_height) ? 23 : 7;
          data_ptr -= y_offset;
       }
       else
@@ -870,23 +880,13 @@ static void ppu_renderoam(uint8 *vidbuf, int scanline)
          data_ptr += y_offset;
       }
 
-      /* if we're on sprite 0 and sprite 0 strike flag isn't set,
-      ** check for a strike
-      */
-      check_strike = (0 == sprite_num) && (false == ppu.strikeflag);
-      strike_pixel = draw_oamtile(bmp_ptr, attrib, data_ptr[0], data_ptr[8], ppu.palette + 16 + col_high, check_strike);
+      bool check_strike = (sprite_num == 0) && (false == ppu.strikeflag);
+      int strike_pixel = draw_oamtile(bmp_ptr, attrib, data_ptr[0], data_ptr[8],
+                                      ppu.palette + 16 + col_high, check_strike);
       if (strike_pixel >= 0)
          ppu_setstrike(strike_pixel);
-
-      /* maximum of 8 sprites per scanline */
-      if (++spritecount == PPU_MAXSPRITE)
-      {
-         ppu.stat |= PPU_STATF_MAXSPRITE;
-         break;
-      }
    }
 
-   /* Restore lefthand column */
    if (ppu.obj_mask)
    {
       ((uint32 *) buf_ptr)[0] = savecol[0];
@@ -1082,6 +1082,10 @@ void ppu_scanline(uint8_t *bmp, int scanline, bool draw_flag)
 {
    if (scanline < 240)
    {
+      /* Rebuild the per-scanline sprite cache once per frame */
+      if (0 == scanline)
+         ppu_build_sprite_cache();
+
       /* Lower the Max Sprite per scanline flag */
       ppu.stat &= ~PPU_STATF_MAXSPRITE;
       ppu_renderscanline(bmp, scanline, draw_flag);

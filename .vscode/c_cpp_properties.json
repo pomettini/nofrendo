@@ -1,0 +1,25 @@
+{
+    "configurations": [
+        {
+            "name": "Playdate",
+            "includePath": [
+                "${workspaceFolder}/src",
+                "${workspaceFolder}/src/nofrendo",
+                "${workspaceFolder}/src/nofrendo/nes",
+                "${workspaceFolder}/src/nofrendo/cpu",
+                "${workspaceFolder}/src/nofrendo/sndhrdw",
+                "${workspaceFolder}/src/nofrendo/libsnss",
+                "/Users/pomettini/Developer/PlaydateSDK/C_API"
+            ],
+            "defines": [
+                "TARGET_PLAYDATE=1",
+                "TARGET_EXTENSION=1",
+                "AUDIO=1"
+            ],
+            "compilerPath": "/usr/local/bin/arm-none-eabi-gcc",
+            "cStandard": "gnu11",
+            "intelliSenseMode": "gcc-arm"
+        }
+    ],
+    "version": 4
+}

@@ -117,15 +117,8 @@ if (TOOLCHAIN STREQUAL "armgcc")
         src/nofrendo/cpu/nes6502.c
         PROPERTIES COMPILE_FLAGS "-Os -DNES6502_SWITCH"
     )
-    # ppu_scanline is the second hottest function (~2.3 KB); -Os keeps it small
-    # so it fits alongside nes6502_execute in the 16 KB I-cache.
-    set_source_files_properties(
-        src/nofrendo/nes/nes_ppu.c
-        PROPERTIES COMPILE_FLAGS "-Os"
-    )
-
-    # Bump function alignment from SDK default 16 to 32 (one full Cortex-M7 cache line).
-    target_compile_options(${PLAYDATE_GAME_DEVICE} PRIVATE -falign-functions=32)
+    # nes_ppu.c stays at -O3: ppu_scanline (2.3 KB) already fits alongside
+    # nes6502_execute in the 16 KB I-cache, so -Os would only make it slower.
 
     # Replace the SDK's linker script with our custom one, which pins nes6502_execute
     # first in .text at a 32-byte boundary so it starts clean on a cache line.

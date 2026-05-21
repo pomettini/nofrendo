@@ -2,6 +2,7 @@
 #include <string.h>
 #include <osd.h>
 #include <nes.h>
+#include "diag.h"
 
 extern PlaydateAPI *pd;
 
@@ -55,14 +56,15 @@ void vid_setpalette(rgb_t *pal) {
 
 /* Called per-scanline by nes_renderframe */
 void ppu_scanline_blit(uint8_t *bmp, int scanline, bool draw_flag) {
-    if (!draw_flag || scanline < 0 || scanline >= NES_SCREEN_HEIGHT)
-        return;
-
-    /* One-time init: grab the raw frame buffer and clear borders to black */
+    /* One-time init regardless of draw_flag: skipped frames must show the
+       last rendered frame, not an uninitialised (white) framebuffer. */
     if (!fb_data) {
         fb_data = pd->graphics->getFrame();
         memset(fb_data, 0x00, LCD_ROWSIZE * LCD_ROWS);
     }
+
+    if (!draw_flag || scanline < 0 || scanline >= NES_SCREEN_HEIGHT)
+        return;
 
     bmp += 8;  /* skip 8-pixel left overdraw */
 

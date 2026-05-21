@@ -13,15 +13,27 @@ static char configfilename[] = "nofrendo.cfg";
 
 extern void sound_fill_buffer(void);
 
+/* Render 1 out of every FRAME_SKIP NES frames. 1 = no skip (full render
+   every frame). 2 = render every other frame (halves PPU pixel cost).
+   Skipped frames still run the 6502 and PPU state machine at full speed. */
+#define FRAME_SKIP 3
+
+static int frame_num = 0;
+
 static int playdate_update(void *ud) {
+    frame_num++;
+    int draw = (frame_num % FRAME_SKIP == 0);
+
     diag_frame_begin();
     diag_render_begin();
-    nes_renderframe(true);
+    nes_renderframe(draw);
     diag_render_end();
     osd_getinput();
     sound_fill_buffer();
     diag_frame_end();
+#ifdef DIAG
     pd->system->drawFPS(0, 0);
+#endif
     pd->graphics->markUpdatedRows(0, LCD_ROWS - 1);
     return 1;
 }
