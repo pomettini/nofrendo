@@ -176,24 +176,91 @@ Increases inter-function padding → reduces code density → more cache pressur
 
 ---
 
+## PPU cost breakdown — needs measurement
+
+The 8 ms delta (ppu_full − cpu_only) is split across three components. We need actual numbers
+before optimising further. **Run these builds and record ppu_full in each:**
+
+```
+make diag-nosprites install-diag   # ppu_full_nosprites
+make diag-nobg install-diag        # ppu_full_nobg
+```
+
+Then:
+- `renderbg_cost  = ppu_full − ppu_full_nosprites`   (everything minus sprites)
+- `renderoam_cost = ppu_full − ppu_full_nobg`         (everything minus BG)
+- `blit_cost      = 8ms − renderbg_cost − renderoam_cost`
+
+Current hypothesis (unconfirmed): renderbg ≈ 6 ms, blit ≈ 1.5 ms, renderoam < 1 ms.
+
+### Why YOFFSET = 0 matters
+
+NES screen is 256×240. Playdate LCD is 400×240. `YOFFSET = (240-240)/2 = 0` — the NES
+fills the full Playdate height. **There is no vertical overscan to skip.** All 240 scanlines
+must be rendered. Scanline-count reduction is not an option.
+
+---
+
 ## What has NOT been tried yet
 
-### Reduce PPU pixel cost (ppu_full − cpu_only = 8 ms)
-- `ppu_renderbg`: 33 tiles × 240 scanlines = 7,920 `draw_bgtile` calls per frame.
-  Each tile requires 2 `PPU_MEM()` double-dereferences for CHR data. A tile cache would
-  help here *if* it can be placed in DTCM or otherwise kept out of the D-cache pool.
-- `ppu_scanline_blit`: already fast (8 LUT lookups + 7 OR + 8 AND per 8 pixels, ~1 ms).
+### Reduce ppu_renderbg register pressure (estimated 0.5–1 ms savings)
 
-### Reduce D-cache thrashing in enemy-heavy scenes
-The NES PRG ROM (32 KB) exceeds D-cache (16 KB). Goombas/mushrooms access different ROM
-regions than the idle game loop. Possible approaches (none tried yet):
-- Align PRG ROM load address to reduce cache set conflicts (requires SRAM layout control)
-- Batch `nes6502_execute` calls to reduce per-scanline cache flush-refill cycles
-- Profile which ROM addresses are most commonly accessed (requires DWT, not available)
+`ppu_renderbg` has ~15 live local variables (bmp_ptr, data_ptr, tile_ptr, attrib_ptr, pal,
+refresh_vaddr, bg_offset, attrib_base, tile_count, tile_index, x_tile, y_tile, col_high,
+attrib, attrib_shift). ARM has 13 GPRs; ~5 must spill to stack. Stack reads/writes are
+D-cache accesses at ~3 cycles each. Register spilling + attribute-tracking branches add
+~20 extra cycles per tile amortised.
 
-### `make diag-nobg` / `make diag-nosprites` matrix
-The profiling matrix in this file was partially invalidated by a cmake cache bug (now fixed:
-`-DPPU_BG=ON -DPPU_SPRITES=ON` in Makefile FLAGS). Needs a fresh run to get clean numbers.
+**Approach**: pre-compute a `uint8 col_high_arr[33]` for all 33 tiles before the render loop.
+The inner loop then only needs: tile_ptr, bmp_ptr, bg_offset, col_high_arr pointer. Compiler
+can keep all four in registers, eliminating most spills and the attrib tracking branches.
+
+```c
+// Compute palette index for all 33 tiles upfront (outside hot loop)
+uint8 col_high_arr[33];
+for (int i = 0; i < 33; i++) { ... col_high_arr[i] = ... }
+
+// Tight inner loop — only 4 live variables, no branches
+for (int i = 0; i < 33; i++) {
+    tile_index = *tile_ptr++;
+    data_ptr   = &PPU_MEM(bg_offset + (tile_index << 4));
+    draw_bgtile(bmp_ptr, data_ptr[0], data_ptr[8], pal + col_high_arr[i]);
+    bmp_ptr += 8;
+}
+```
+
+### Reduce D-cache thrashing in enemy-heavy scenes (cpu_only enemy overhead)
+
+NES PRG ROM is 32 KB; D-cache is 16 KB. Goombas and mushrooms access ROM regions not used
+during idle gameplay — these evict cache lines and cause ~3–7 ms cpu_only increase. Possible
+approaches (none tried yet):
+- Align PRG ROM base address in SRAM to a 16 KB boundary to minimise 4-way set conflicts
+- Batch `nes6502_execute` calls (fewer but larger calls → less per-call cache-warmup overhead)
+
+### Background tile CHR cache — only if DTCM becomes available
+
+The 4 KB `bg_tile_cache[256][8]` approach was tried and **caused regression** (see failures
+above). It would only work without D-cache pollution if placed in DTCM.
+
+A smaller variant caching only **visible tiles** (~30–40 unique tile indices = ~640 bytes)
+would reduce D-cache impact significantly. Not yet tried; expected savings small if CHR
+data is already hot from per-frame use.
+
+### FRAME_SKIP arithmetic (reference)
+
+With cpu_only = 19 ms and ppu_full = 28 ms, average frame time by skip level:
+
+| FRAME_SKIP | avg ms | NES fps | display fps |
+|---:|---:|---:|---:|
+| 2 | 23.5 | ~42 | ~21 |
+| 3 | 22.0 | ~45 | ~15 |
+| 4 | 21.25 | ~47 | ~12 |
+| 6 | 20.5 | ~49 | ~8 |
+| 8 | 20.1 | ~50 | ~6 |
+
+**50 fps NES speed requires ≈ FRAME_SKIP=8, which gives ~6 fps visual refresh — unacceptable.**
+The only viable path to 50 fps with good display quality is reducing ppu_full below 22 ms so
+that FRAME_SKIP=2 gives avg ≤ 20 ms. Target: **cut 6 ms from the 8 ms PPU cost.**
 
 ---
 
