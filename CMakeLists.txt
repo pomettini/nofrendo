@@ -69,8 +69,12 @@ option(AUDIO       "Enable NES APU" OFF)
 option(PPU_BG      "Enable PPU background rendering (OFF to measure cost)" ON)
 option(PPU_SPRITES "Enable PPU sprite rendering (OFF to measure cost)" ON)
 option(PPU_BLIT    "Enable Playdate scanline blit (OFF to measure cost)" ON)
+option(ALIGN_PRG_ROM "Align iNES PRG ROM start for cache experiments" OFF)
 set(NES_CPU_BATCH_SCANLINES "1" CACHE STRING
     "Run NES CPU cycles in batches this many scanlines wide for no-hblank mappers")
+set(NES6502_OPT_LEVEL "O3" CACHE STRING
+    "Optimization level for nes6502.c performance experiments")
+option(NES6502_ALIGN_LOOPS "Align 6502 hot loops for performance experiments" OFF)
 if (AUDIO)
     file(GLOB AUDIO_SOURCES src/nofrendo/sndhrdw/*.c)
     list(APPEND NOFRENDO_CORE ${AUDIO_SOURCES})
@@ -97,7 +101,10 @@ set(GAME_DEFINES
     $<$<NOT:$<BOOL:${PPU_BG}>>:DISABLE_PPU_BG=1>
     $<$<NOT:$<BOOL:${PPU_SPRITES}>>:DISABLE_PPU_SPRITES=1>
     $<$<NOT:$<BOOL:${PPU_BLIT}>>:DISABLE_PPU_BLIT=1>
+    $<$<BOOL:${ALIGN_PRG_ROM}>:ALIGN_PRG_ROM=1>
     NES_CPU_BATCH_SCANLINES=${NES_CPU_BATCH_SCANLINES}
+    NES6502_OPT_LEVEL_LABEL="${NES6502_OPT_LEVEL}"
+    $<$<BOOL:${NES6502_ALIGN_LOOPS}>:NES6502_ALIGN_LOOPS=1>
 )
 
 # add_executable / add_library must come before including playdate_game.cmake
@@ -124,10 +131,15 @@ include(${SDK}/C_API/buildsupport/playdate_game.cmake)
 if (TOOLCHAIN STREQUAL "armgcc")
     target_compile_options(${PLAYDATE_GAME_DEVICE} PRIVATE -O3)
 
-    # nes6502_execute: -Os + switch dispatch → ~13 KB (fits Rev B 16 KB I-cache).
+    # Keep 6502 flags measurable: code shape and I-cache pressure both matter.
+    set(NES6502_COMPILE_FLAGS
+        "-${NES6502_OPT_LEVEL} -DNES6502_SWITCH -DNES6502_LEGAL_ONLY -DNES6502_PC_PTR")
+    if (NES6502_ALIGN_LOOPS)
+        string(APPEND NES6502_COMPILE_FLAGS " -falign-loops=32")
+    endif()
     set_source_files_properties(
         src/nofrendo/cpu/nes6502.c
-        PROPERTIES COMPILE_FLAGS "-O2 -DNES6502_SWITCH -DNES6502_LEGAL_ONLY -DNES6502_PC_PTR"
+        PROPERTIES COMPILE_FLAGS "${NES6502_COMPILE_FLAGS}"
     )
     # nes_ppu.c stays at -O3: ppu_scanline (2.3 KB) already fits alongside
     # nes6502_execute in the 16 KB I-cache, so -Os would only make it slower.

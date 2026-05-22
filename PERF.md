@@ -1,7 +1,8 @@
 # Performance Notes — Nofrendo Playdate Port
 
 Running log of profiling data, findings, and optimization decisions.
-Target: **50 fps** (PAL NES speed). Current best: **~37 fps** idle, **27–33 fps** with enemies.
+Target: **50 fps** (PAL NES speed). Current best full-level Mario row:
+**~44-50 fps** in light windows, **~33-39 fps** in the remaining slow windows.
 
 ---
 
@@ -485,13 +486,148 @@ Findings:
   changing another subsystem; if that scales, CPU/PPU handoff and cache churn are a larger
   lever than individual memory-helper branches.
 
+The full Mario 1-1 run from the `-O2` `nofrendo-batchcpu16.pdx` improved the feel again.
+It became the batching baseline:
+
+| Segment in submitted log | fps | avg | cpu_only | ppu_full |
+|---|---:|---:|---:|---:|
+| Fast level windows, frames 60-300 | 46-50 | 20-21 ms | 6-14 ms | 17-22 ms |
+| First slowdown ramp, frames 420-600 | 38-42 | 23-26 ms | 17-20 ms | 24-27 ms |
+| Busy mid-level windows, frames 900-1920 | 32-41 | 24-30 ms | 18-24 ms | 25-31 ms |
+| Quiet plateau, frames 2040-2280 | 42-43 | 22-23 ms | 14-16 ms | 23-24 ms |
+| Level tail, frames 2400-3000 | 37-45 | 22-26 ms | 14-20 ms | 23-27 ms |
+
+Batch 16 findings:
+
+- The best windows now touch 50 fps with draw frames at 17-22 ms and skipped visual
+  frames at 6-14 ms.
+- The remaining slowdowns still line up with `cpu_only` rising to 20-24 ms; `ppu_full`
+  remains about 7-8 ms above it. Wider CPU batching is worth one more measurement before
+  shifting focus back to background draw cost.
+- The user played the whole level and reported this as the best version so far before the
+  CPU `-O3` row below.
+
+The `cpu_batch=32` packages are **not valid speed rows for Mario**. They log fast windows
+similar to batch 16, but Mario feels about half speed. The first package also flushed
+deferred visible-line CPU cycles inside scanline 241 after `ppu_scanline()` had already
+raised vblank but before `ppu_checknmi()` delivered NMI. Flushing before vblank fixed that
+ordering bug, but the retest still plays in slow motion. The wider visible-frame batch is
+itself too coarse for Mario: the PPU can render far ahead of the 6502 while this core
+derives sprite-zero strike timing from the CPU cycle count at scanline render time and
+serves it through `PPUSTATUS`. A pending-scanline strike timestamp bias retest was worse
+below. Keep batch 16 as the current timing-safe width for Mario.
+
+### Align iNES PRG ROM start - flat
+
+The busy Mario slowdown remains CPU-side at batch 16. One D-cache hypothesis was PRG ROM
+alignment: Mario's 32 KB PRG working set is larger than the Playdate D-cache, and a poor
+SRAM base could add set conflicts while enemy code comes in. The experiment kept
+`cpu_batch=16` and over-allocated the loaded ROM file buffer so the iNES PRG start after
+the 16-byte header landed on a 16 KB boundary for the no-trainer test ROM.
+
+The full Mario 1-1 row from `nofrendo-batchcpu16-alignrom.pdx` is effectively flat against
+the non-aligned batch 16 row:
+
+| Segment in submitted log | fps | avg | cpu_only | ppu_full |
+|---|---:|---:|---:|---:|
+| Fast level windows, frames 60-360 | 45-50 | 20-21 ms | 6-13 ms | 17-23 ms |
+| First slowdown ramp, frames 420-660 | 39-44 | 22-25 ms | 14-19 ms | 23-26 ms |
+| Busy windows, frames 960-1920 | 33-43 | 22-29 ms | 11-23 ms | 21-31 ms |
+| Quiet plateau, frames 1980-2340 | 43-44 | 22-23 ms | 14-15 ms | 23-24 ms |
+| Level tail, frames 2400-3000 | 36-44 | 22-27 ms | 13-21 ms | 23-28 ms |
+
+Findings:
+
+- Aligned PRG placement does not move the slow floor: the busy row still reaches
+  21-23 ms `cpu_only` and 28-31 ms draw frames.
+- Keep the probe reproducible for now, but do not spend the next iteration on more PRG
+  base-address variants.
+
+### Batched sprite-zero strike cycle bias - regression
+
+`cpu_batch=32` still reduced the measured host-side CPU cost after the vblank-boundary
+ordering fix, but Mario ran in slow motion. This core records sprite-zero hit time while
+rendering the scanline as `nes6502_getcycles(false) + x/3`. During batched scanlines the
+PPU can render multiple lines before the CPU executes their accumulated cycles, so the
+stamp was missing those pending line cycles.
+
+The batch 32 retest passed the current pending scanline-cycle bias into `ppu_scanline()`
+and added it only when sprite-zero strike time was stamped. The user reports that it feels
+worse. The half-level row from `nofrendo-batchcpu32-strikebias.pdx` also loses the earlier
+fast-looking batch 32 CPU row:
+
+| Segment in submitted log | fps | avg | cpu_only | ppu_full |
+|---|---:|---:|---:|---:|
+| Early fast windows, frames 60-300 | 42-47 | 20-23 ms | 7-15 ms | 21-24 ms |
+| First level slowdown, frames 360-900 | 37-42 | 23-26 ms | 13-20 ms | 24-28 ms |
+| Busy half-level windows, frames 960-1920 | 31-37 | 26-32 ms | 20-25 ms | 28-33 ms |
+
+Findings:
+
+- A pending-line offset on only the strike timestamp is not enough to make batch 32 valid.
+  The visible PPU/status timing dependency is broader than that one timestamp, or the
+  bias itself is too crude once CPU execution is deferred.
+- The retest is not a speed gain either: its busy windows overlap or trail batch 16.
+- The code change was reverted. Do not keep widening scanline CPU batches before a
+  different timing model exists.
+
+### 6502 optimization level at batch 16 - current best
+
+The next CPU-side probe kept the known-good `cpu_batch=16` path and made the `nes6502.c`
+optimization level selectable. The preceding diagnostic CPU core used `-O2`; the first
+retest switched only that file to `-O3`. This compares faster generated code against the
+extra hot code size and I-cache pressure on the Playdate. The diagnostic banner reports
+`cpu_opt=<level>`. The linked `-O3` `nes6502_execute` is 0x332c bytes (about 13.1 KB);
+the preceding `-O2` build row was 0x2d3c bytes (about 11.6 KB).
+
+The full Mario 1-1 row from `nofrendo-batchcpu16-cpuO3.pdx` is the new current best:
+
+| Segment in submitted log | fps | avg | cpu_only | ppu_full |
+|---|---:|---:|---:|---:|
+| Fast level windows, frames 60-300 | 46-50 | 20-21 ms | 5-13 ms | 14-22 ms |
+| First slowdown ramp, frames 360-960 | 39-45 | 22-25 ms | 13-18 ms | 22-26 ms |
+| Busy mid-level windows, frames 1020-1800 | 33-43 | 23-30 ms | 16-23 ms | 24-31 ms |
+| Quiet plateau, frames 1920-2280 | 44-45 | 22 ms | 13-15 ms | 22-23 ms |
+| Level tail, frames 2340-2880 | 38-45 | 21-25 ms | 13-19 ms | 22-27 ms |
+
+Findings:
+
+- The user played the full level and reports that, aside from a few slowdowns, it feels
+  very good.
+- The best windows now hit 50 fps with the lowest draw-frame row yet: 14 ms at frame 240.
+- The stubborn rows remain the same shape: slowdowns are still led by `cpu_only` climbing
+  to 21-23 ms, with draw frames roughly 8 ms above that.
+- Promote `-O3` as the next baseline for the 6502 CPU core on the measured Rev B device.
+
+### 6502 loop alignment at batch 16 - pending device row
+
+The next layout probe stays on `cpu_batch=16`, keeps the measured `-O3` CPU core, and adds
+`-falign-loops=32` only to `nes6502.c`. It is intentionally small: the device row decides
+whether the hot interpreter loop benefits from loop alignment enough to justify any code
+growth. The diagnostic banner reports `cpu_loop_align=32` for this package. The linked
+`nes6502_execute` grows from the O3 baseline 0x332c bytes to 0x34b4 bytes.
+
 Build status on 2026-05-22:
 
 - `make diag-batchcpu` succeeds for device and simulator packages.
 - The diagnostic banner reports `cpu_batch=8` for the experiment.
 - The build was copied to the device as `nofrendo-batchcpu.pdx`.
 - `make diag-batchcpu CPU_BATCH=16` also succeeds and was copied as
-  `nofrendo-batchcpu16.pdx` for the next batch-width comparison.
+  `nofrendo-batchcpu16.pdx`.
+- `make diag-batchcpu CPU_BATCH=32` also succeeds and was copied as
+  `nofrendo-batchcpu32.pdx`; that first package exposed the pre-NMI flush-order bug above.
+- The vblank-boundary flush fix was rebuilt at `CPU_BATCH=32` and copied as
+  `nofrendo-batchcpu32-vblank.pdx`; the wider visible batch still gives Mario slow motion.
+- `make diag-alignrom` succeeds for device and simulator packages and keeps
+  `cpu_batch=16` while reporting `prg_align=16k`; it was copied to the device as
+  `nofrendo-batchcpu16-alignrom.pdx` for the alignment row above.
+- The strike-cycle bias retest was rebuilt with `make diag-batchcpu CPU_BATCH=32`
+  and copied as `nofrendo-batchcpu32-strikebias.pdx`; the row above regressed and the
+  strike-bias code path was removed.
+- `make diag-cpuopt CPU_OPT=O3` succeeds for device and simulator packages and was copied
+  as `nofrendo-batchcpu16-cpuO3.pdx`.
+- `make diag-cpualign` succeeds for device and simulator packages and was copied as
+  `nofrendo-batchcpu16-cpuO3-loopalign.pdx`.
 
 ### Background tile CHR cache — only if DTCM becomes available
 

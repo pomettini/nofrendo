@@ -340,19 +340,20 @@ void nes_renderframe(bool draw_flag)
 
    while (262 != nes.scanline)
    {
+      /* Visible-line work must finish before vblank raises its status bit. */
+      if (241 == nes.scanline && pending_cpu_lines)
+      {
+         elapsed_cycles = execute_cpu((int) nes.scanline_cycles);
+         nes.scanline_cycles -= (float) elapsed_cycles;
+         nes_checkfiq(elapsed_cycles);
+         pending_cpu_lines = 0;
+      }
+
       ppu_scanline(scanline+8, nes.scanline, draw_flag);
       ppu_scanline_blit(scanline, nes.scanline, draw_flag);
 
       if (241 == nes.scanline)
       {
-         if (pending_cpu_lines)
-         {
-            elapsed_cycles = execute_cpu((int) nes.scanline_cycles);
-            nes.scanline_cycles -= (float) elapsed_cycles;
-            nes_checkfiq(elapsed_cycles);
-            pending_cpu_lines = 0;
-         }
-
          /* 7-9 cycle delay between when VINT flag goes up and NMI is taken */
          elapsed_cycles = execute_cpu(7);
          nes.scanline_cycles -= elapsed_cycles;

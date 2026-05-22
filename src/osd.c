@@ -1,4 +1,5 @@
 #include <pd_api.h>
+#include <stdint.h>
 #include <string.h>
 #include "diag.h"
 #include <noftypes.h>
@@ -77,6 +78,7 @@ int osd_makesnapname(char *filename, int len) {
     return -1;
 }
 
+static char *rom_storage = NULL;
 static char *rom_data = NULL;
 
 char *osd_getromdata(const char *name) {
@@ -84,13 +86,26 @@ char *osd_getromdata(const char *name) {
     if (pd->file->stat(name, &stat) != 0)
         return NULL;
 
-    rom_data = malloc(stat.size);
-    if (!rom_data)
+#ifdef ALIGN_PRG_ROM
+    const uintptr_t prg_alignment = 16 * 1024;
+    const uintptr_t ines_header_size = 16;
+    rom_storage = malloc(stat.size + prg_alignment);
+    if (rom_storage) {
+        uintptr_t prg_start = ((uintptr_t)rom_storage + ines_header_size
+                               + (prg_alignment - 1)) & ~(prg_alignment - 1);
+        rom_data = (char *)(prg_start - ines_header_size);
+    }
+#else
+    rom_storage = malloc(stat.size);
+    rom_data = rom_storage;
+#endif
+    if (!rom_storage)
         return NULL;
 
     SDFile *f = pd->file->open(name, kFileRead);
     if (!f) {
-        free(rom_data);
+        free(rom_storage);
+        rom_storage = NULL;
         rom_data = NULL;
         return NULL;
     }
@@ -101,6 +116,7 @@ char *osd_getromdata(const char *name) {
 }
 
 void osd_unloadromdata(void) {
-    free(rom_data);
+    free(rom_storage);
+    rom_storage = NULL;
     rom_data = NULL;
 }

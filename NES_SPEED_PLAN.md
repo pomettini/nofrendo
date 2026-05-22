@@ -145,8 +145,27 @@ register windows before the generic memory-handler scan was flat to slightly
 worse in the Mario device row. Batching scanline CPU execution for simple
 no-hblank mappers is the first clear follow-up win: the first eight-scanline row
 drops Mario idle `cpu_only` from about 20 ms to 15 ms and full draw frames from
-about 28 ms to 23-24 ms. Busy object windows still miss the 20 ms budget, so the
-next measurement widens that batch before changing another subsystem.
+about 28 ms to 23-24 ms. The sixteen-scanline full-level Mario row feels better
+again and reaches 46-50 fps in its fastest windows, but object-heavy windows
+still raise skipped visual frames to 20-24 ms. The next measurement tries a
+32-scanline batch before changing another subsystem. The first 32-scanline
+package was an invalid fast-looking row because pending visible-line CPU work
+ran after vblank was raised and before NMI delivery; retest it only with that
+vblank-boundary flush ordering fixed. The fixed retest still gives Mario
+slow-motion gameplay: this core's sprite-zero/status timing cannot tolerate the
+PPU running that far ahead of the 6502. Treat batch 16 as the Mario ceiling for
+now and move to the busy-scene CPU/cache path. The first low-risk probe there
+keeps `cpu_batch=16` and aligns the iNES PRG start on a 16 KB boundary to test
+whether ROM buffer placement is contributing to the enemy-scene slowdown. The
+full-level row is flat against the non-aligned batch 16 row, so ROM base
+alignment is not the next busy-scene lever.
+
+The next batch experiment targeted sprite-zero strike timing: batched rendering
+lets the PPU get ahead of CPU execution, so the first batch 32 slow-motion row
+could have been missing pending scanline cycles in its strike timestamp. The
+pending-cycle bias retest regressed feel and the busy half-level row, so that
+change was removed. Close the wide visible-frame batch branch for now and
+continue on batch 16.
 
 ## 3. I-Cache: Shrink and Isolate Hot Interpreter Code
 
@@ -156,9 +175,13 @@ Risk: medium
 
 This should happen before large CPU rewrites. The forum thread's strongest
 lesson is that Playdate performance can be dominated by whether the hot loop
-fits in instruction cache. The current build already improved this by compiling
-`nes6502.c` with `-Os -DNES6502_SWITCH`, shrinking `nes6502_execute` to about
-13.5 KB. That is useful on Rev B, but still far above the Rev A 4 KB cache.
+fits in instruction cache. The current build already improved this with switch
+dispatch, legal-opcode stubs, and a direct PC pointer. The full-level Mario row
+improves again when `nes6502.c` moves from `-O2` to `-O3`, despite
+`nes6502_execute` growing from about 11.6 KB to about 13.1 KB. Keep `-O3` as
+the Rev B baseline now, but still compare it with layout rows rather than
+assuming denser code wins. Rev B benefits while the hot path stays near the
+16 KB I-cache; Rev A still has only a 4 KB cache.
 
 The next target is not necessarily "make the whole interpreter 4 KB." The target
 is to make the common interpreter path much smaller and push rare paths out of
@@ -339,6 +362,8 @@ than D-cache:
 
 Experiments to try:
 
+- Before TCM placement, vary PRG ROM buffer alignment on the timing-safe
+  `cpu_batch=16` path and keep it only if the busy Mario row improves.
 - Use stack-local copies for hot structs during long operations, then copy back.
 - Create a small persistent DTCM pool near the low end of the stack, discovered
   from `__builtin_frame_address(0)` during `kEventInit`.

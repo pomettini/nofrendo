@@ -35,6 +35,18 @@ extern PlaydateAPI *pd;
 #define DIAG_BLIT "on"
 #endif
 
+#ifdef ALIGN_PRG_ROM
+#define DIAG_PRG_ALIGN "16k"
+#else
+#define DIAG_PRG_ALIGN "off"
+#endif
+
+#ifdef NES6502_ALIGN_LOOPS
+#define DIAG_CPU_LOOP_ALIGN "32"
+#else
+#define DIAG_CPU_LOOP_ALIGN "off"
+#endif
+
 static uint32_t window_start  = 0;
 static uint32_t render_start  = 0;
 static uint32_t render_accum  = 0;
@@ -83,7 +95,10 @@ void diag_frame_begin(void) {
                                  " bg=" DIAG_BG
                                  " sprites=" DIAG_SPRITES
                                  " blit=" DIAG_BLIT
-                                 " cpu_batch=" DIAG_STRINGIFY(NES_CPU_BATCH_SCANLINES));
+                                 " cpu_batch=" DIAG_STRINGIFY(NES_CPU_BATCH_SCANLINES)
+                                 " cpu_opt=" NES6502_OPT_LEVEL_LABEL
+                                 " cpu_loop_align=" DIAG_CPU_LOOP_ALIGN
+                                 " prg_align=" DIAG_PRG_ALIGN);
         window_start = pd->system->getCurrentTimeMilliseconds();
         initialized  = true;
     }
