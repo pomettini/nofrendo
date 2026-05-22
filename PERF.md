@@ -404,7 +404,7 @@ Findings:
 - The change kept `nes6502_execute` around 12.7 KB, but it did not produce a clear device
   win. It was reverted before trying wider PC operand fetch changes.
 
-### Skip sprite render cache on skipped frames — pending device row
+### Skip sprite render cache on skipped frames — regression
 
 `ppu_build_sprite_cache()` precomputes scanline sprite lists and CHR pattern rows for
 visible sprite rendering. `FRAME_SKIP=2` means every other frame intentionally skips that
@@ -412,14 +412,65 @@ rendering, but the cache was still rebuilt at scanline 0 on those skipped frames
 skipped frame only uses `ppu_fakeoam()` for the sprite-0 path, which reads raw sprite data
 directly and does not consume the render cache.
 
-The next speed-first experiment rebuilds the sprite render cache only when `draw_flag` is
-true. That should affect `cpu_only` rather than draw-frame sprite pixels. Keep it if the
-Mario 1-1 standing and moving rows improve without visible behavior changes on draw frames.
+The experiment rebuilt the sprite render cache only when `draw_flag` was true. The device
+row from `nofrendo-skipcache.pdx` was worse:
+
+| Segment in submitted log | fps | avg | cpu_only | ppu_full |
+|---|---:|---:|---:|---:|
+| Level 1-1 idle, frames 1200–1380 | 34 | 28 ms | 21 ms | 30 ms |
+| Moving with Goombas, frames 1800–1980 | 25–29 | 34–38 ms | 25–29 ms | 36–41 ms |
+
+Findings:
+
+- The idle row regressed from the normal 37 fps, 19 ms `cpu_only`, 28 ms `ppu_full`
+  baseline.
+- Removing the cache build may leave later draw work or adjacent data colder, or the small
+  edit may perturb code/data layout. Either way it is not a speed win on device.
+- The change was reverted. Do not revisit skipped-frame sprite cache work without finer
+  attribution than the current frame-window profiler.
+
+### Fixed NES memory-map fast path — no clear win
+
+The CPU read/write helpers already fast-path PRG ROM and base RAM. Mirrored RAM and the
+fixed PPU/APU/input register windows still scanned handler ranges. The experiment:
+
+- Handles all `$0000-$1FFF` RAM mirrors with the same 2 KB RAM mask.
+- Routes `$2000-$4017` through the default handler prefix installed by `nes.c` before
+  falling back to mapper/protect range scans.
+- Keeps handler calls indirect because the CPU helpers live beside the relocated interpreter
+  hot section; direct far calls from copied code would be a separate relocation hazard.
+
+The device row from `nofrendo-memmap.pdx` was flat to slightly worse:
+
+| Segment in submitted log | fps | avg | cpu_only | ppu_full |
+|---|---:|---:|---:|---:|
+| Level 1-1 idle, frames 300-480 | 36 | 27 ms | 20 ms | 28 ms |
+| Goombas visible, frames 1080-1200 | 29-30 | 32-33 ms | 24-25 ms | 34-36 ms |
+
+Findings:
+
+- The fixed windows did not lower `cpu_only` in the Mario row. The extra hot helper
+  branches are not worth keeping before a more targeted access-frequency measurement.
+- The change was reverted before the next CPU experiment.
 
 Build status on 2026-05-22:
 
 - `make` succeeds for device and simulator packages.
-- The build was copied to the device as `nofrendo-skipcache.pdx`.
+- The build was copied to the device as `nofrendo-memmap.pdx`.
+
+### Batch scanline CPU execution - pending device row
+
+The normal frame loop returns from `nes6502_execute()` after every scanline, interleaving
+the interpreter with PPU scanline work. The next speed-first experiment batches CPU cycles
+for eight scanlines at a time when the mapper has no hblank callback. It still flushes at
+the vblank/NMI line and the end of frame, but it deliberately trades scanline timing
+accuracy for fewer CPU loop entries and less CPU/PPU instruction-cache ping-pong.
+
+Build status on 2026-05-22:
+
+- `make diag-batchcpu` succeeds for device and simulator packages.
+- The diagnostic banner reports `cpu_batch=8` for the experiment.
+- The build was copied to the device as `nofrendo-batchcpu.pdx`.
 
 ### Background tile CHR cache — only if DTCM becomes available
 

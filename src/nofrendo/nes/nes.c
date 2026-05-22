@@ -47,6 +47,10 @@
 #define  NES_SCANLINE_CYCLES  (1364.0 / NES_CLOCK_DIVIDER)
 #define  NES_FIQ_PERIOD       (NES_MASTER_CLOCK / NES_CLOCK_DIVIDER / 60)
 
+#ifndef NES_CPU_BATCH_SCANLINES
+#define NES_CPU_BATCH_SCANLINES 1
+#endif
+
 #define  NES_RAMSIZE          0x800
 
 #define  NES_SKIP_LIMIT       (NES_REFRESH_RATE / 5)   /* 12 or 10, depending on PAL/NTSC */
@@ -324,9 +328,15 @@ void nes_renderframe(bool draw_flag)
 {
    int elapsed_cycles;
    mapintf_t *mapintf = nes.mmc->intf;
+   int (*execute_cpu)(int) = nes6502_execute_ptr ? nes6502_execute_ptr : nes6502_execute;
+   int cpu_batch_lines = mapintf->hblank ? 1 : NES_CPU_BATCH_SCANLINES;
+   int pending_cpu_lines = 0;
    int in_vblank = 0;
 
    uint8 scanline[NES_SCREEN_WIDTH+16];
+
+   if (cpu_batch_lines < 1)
+      cpu_batch_lines = 1;
 
    while (262 != nes.scanline)
    {
@@ -335,8 +345,16 @@ void nes_renderframe(bool draw_flag)
 
       if (241 == nes.scanline)
       {
+         if (pending_cpu_lines)
+         {
+            elapsed_cycles = execute_cpu((int) nes.scanline_cycles);
+            nes.scanline_cycles -= (float) elapsed_cycles;
+            nes_checkfiq(elapsed_cycles);
+            pending_cpu_lines = 0;
+         }
+
          /* 7-9 cycle delay between when VINT flag goes up and NMI is taken */
-         elapsed_cycles = (nes6502_execute_ptr ? nes6502_execute_ptr : nes6502_execute)(7);
+         elapsed_cycles = execute_cpu(7);
          nes.scanline_cycles -= elapsed_cycles;
          nes_checkfiq(elapsed_cycles);
 
@@ -351,12 +369,24 @@ void nes_renderframe(bool draw_flag)
          mapintf->hblank(in_vblank);
 
       nes.scanline_cycles += (float) NES_SCANLINE_CYCLES;
-      elapsed_cycles = (nes6502_execute_ptr ? nes6502_execute_ptr : nes6502_execute)((int) nes.scanline_cycles);
-      nes.scanline_cycles -= (float) elapsed_cycles;
-      nes_checkfiq(elapsed_cycles);
+      pending_cpu_lines++;
+      if (pending_cpu_lines >= cpu_batch_lines || 241 == nes.scanline)
+      {
+         elapsed_cycles = execute_cpu((int) nes.scanline_cycles);
+         nes.scanline_cycles -= (float) elapsed_cycles;
+         nes_checkfiq(elapsed_cycles);
+         pending_cpu_lines = 0;
+      }
 
       ppu_endscanline(nes.scanline);
       nes.scanline++;
+   }
+
+   if (pending_cpu_lines)
+   {
+      elapsed_cycles = execute_cpu((int) nes.scanline_cycles);
+      nes.scanline_cycles -= (float) elapsed_cycles;
+      nes_checkfiq(elapsed_cycles);
    }
 
    nes.scanline = 0;

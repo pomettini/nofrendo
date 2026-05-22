@@ -138,9 +138,13 @@ Background rendering is the PPU cost with a measured delta so far, but the next
 immediate work should improve the busy-scene CPU/emulation path because it
 already misses the 20 ms budget before full pixel drawing. The first follow-up
 CPU experiment extended the existing `pc_ptr` fast path to byte operands, but the
-same-scene device row was flat and that change was dropped. The next experiment
-removes skipped-frame sprite render-cache rebuild work that those no-draw frames
-cannot use.
+same-scene device row was flat and that change was dropped. Removing skipped-frame
+sprite render-cache rebuild work regressed the next device row too, so that change
+was also dropped. Fast-pathing fixed RAM mirrors and the standard PPU/APU/input
+register windows before the generic memory-handler scan was flat to slightly
+worse in the Mario device row. The current speed-first CPU experiment batches
+scanline CPU execution for simple no-hblank mappers to test whether interpreter
+re-entry and CPU/PPU cache churn are a larger lever than individual access paths.
 
 ## 3. I-Cache: Shrink and Isolate Hot Interpreter Code
 

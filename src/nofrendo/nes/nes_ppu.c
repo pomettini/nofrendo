@@ -1108,8 +1108,8 @@ void ppu_scanline(uint8_t *bmp, int scanline, bool draw_flag)
 {
    if (scanline < 240)
    {
-      /* Skipped frames only need the sprite-0 fake path below. */
-      if (0 == scanline && draw_flag)
+      /* Rebuild caches once per frame at scanline 0 */
+      if (0 == scanline)
          ppu_build_sprite_cache();
 
       /* Lower the Max Sprite per scanline flag */

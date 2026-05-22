@@ -8,6 +8,8 @@
 extern PlaydateAPI *pd;
 
 #define WINDOW 60
+#define DIAG_STRINGIFY_INNER(value) #value
+#define DIAG_STRINGIFY(value) DIAG_STRINGIFY_INNER(value)
 
 #if AUDIO
 #define DIAG_AUDIO "on"
@@ -80,7 +82,8 @@ void diag_frame_begin(void) {
                                  " audio=" DIAG_AUDIO
                                  " bg=" DIAG_BG
                                  " sprites=" DIAG_SPRITES
-                                 " blit=" DIAG_BLIT);
+                                 " blit=" DIAG_BLIT
+                                 " cpu_batch=" DIAG_STRINGIFY(NES_CPU_BATCH_SCANLINES));
         window_start = pd->system->getCurrentTimeMilliseconds();
         initialized  = true;
     }

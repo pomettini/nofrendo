@@ -69,6 +69,8 @@ option(AUDIO       "Enable NES APU" OFF)
 option(PPU_BG      "Enable PPU background rendering (OFF to measure cost)" ON)
 option(PPU_SPRITES "Enable PPU sprite rendering (OFF to measure cost)" ON)
 option(PPU_BLIT    "Enable Playdate scanline blit (OFF to measure cost)" ON)
+set(NES_CPU_BATCH_SCANLINES "1" CACHE STRING
+    "Run NES CPU cycles in batches this many scanlines wide for no-hblank mappers")
 if (AUDIO)
     file(GLOB AUDIO_SOURCES src/nofrendo/sndhrdw/*.c)
     list(APPEND NOFRENDO_CORE ${AUDIO_SOURCES})
@@ -95,6 +97,7 @@ set(GAME_DEFINES
     $<$<NOT:$<BOOL:${PPU_BG}>>:DISABLE_PPU_BG=1>
     $<$<NOT:$<BOOL:${PPU_SPRITES}>>:DISABLE_PPU_SPRITES=1>
     $<$<NOT:$<BOOL:${PPU_BLIT}>>:DISABLE_PPU_BLIT=1>
+    NES_CPU_BATCH_SCANLINES=${NES_CPU_BATCH_SCANLINES}
 )
 
 # add_executable / add_library must come before including playdate_game.cmake
