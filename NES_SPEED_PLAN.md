@@ -142,9 +142,11 @@ same-scene device row was flat and that change was dropped. Removing skipped-fra
 sprite render-cache rebuild work regressed the next device row too, so that change
 was also dropped. Fast-pathing fixed RAM mirrors and the standard PPU/APU/input
 register windows before the generic memory-handler scan was flat to slightly
-worse in the Mario device row. The current speed-first CPU experiment batches
-scanline CPU execution for simple no-hblank mappers to test whether interpreter
-re-entry and CPU/PPU cache churn are a larger lever than individual access paths.
+worse in the Mario device row. Batching scanline CPU execution for simple
+no-hblank mappers is the first clear follow-up win: the first eight-scanline row
+drops Mario idle `cpu_only` from about 20 ms to 15 ms and full draw frames from
+about 28 ms to 23-24 ms. Busy object windows still miss the 20 ms budget, so the
+next measurement widens that batch before changing another subsystem.
 
 ## 3. I-Cache: Shrink and Isolate Hot Interpreter Code
 

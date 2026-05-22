@@ -458,19 +458,40 @@ Build status on 2026-05-22:
 - `make` succeeds for device and simulator packages.
 - The build was copied to the device as `nofrendo-memmap.pdx`.
 
-### Batch scanline CPU execution - pending device row
+### Batch scanline CPU execution - current best CPU win
 
 The normal frame loop returns from `nes6502_execute()` after every scanline, interleaving
-the interpreter with PPU scanline work. The next speed-first experiment batches CPU cycles
-for eight scanlines at a time when the mapper has no hblank callback. It still flushes at
-the vblank/NMI line and the end of frame, but it deliberately trades scanline timing
-accuracy for fewer CPU loop entries and less CPU/PPU instruction-cache ping-pong.
+the interpreter with PPU scanline work. The first speed-first batch experiment runs CPU
+cycles for eight scanlines at a time when the mapper has no hblank callback. It still
+flushes at the vblank/NMI line and the end of frame, but it deliberately trades scanline
+timing accuracy for fewer CPU loop entries and less CPU/PPU instruction-cache ping-pong.
+
+The device row from `nofrendo-batchcpu.pdx` is the first clear follow-up win:
+
+| Segment in submitted log | fps | avg | cpu_only | ppu_full |
+|---|---:|---:|---:|---:|
+| Level 1-1 idle, frames 360-600 | 43 | 22 ms | 15 ms | 23-24 ms |
+| Light moving windows, frames 780-1200 | 42-49 | 20-23 ms | 7-17 ms | 17-24 ms |
+| Busy moving windows, frames 1440-2280 | 31-41 | 24-32 ms | 18-24 ms | 25-33 ms |
+| Mushroom sequence, frames 2640-3120 | 33-38 | 25-30 ms | 19-23 ms | 27-31 ms |
+
+Findings:
+
+- Batch width 8 drops idle skipped-frame `cpu_only` from the normal about 20 ms row to
+  15 ms and drops the idle full frame from about 28 ms to 23-24 ms.
+- Busy object windows still climb back to 20-24 ms before draw-frame cost is considered,
+  but the user reports this as the best and smoothest build tried so far.
+- Keep the batching path. The next measurement should compare a wider batch width before
+  changing another subsystem; if that scales, CPU/PPU handoff and cache churn are a larger
+  lever than individual memory-helper branches.
 
 Build status on 2026-05-22:
 
 - `make diag-batchcpu` succeeds for device and simulator packages.
 - The diagnostic banner reports `cpu_batch=8` for the experiment.
 - The build was copied to the device as `nofrendo-batchcpu.pdx`.
+- `make diag-batchcpu CPU_BATCH=16` also succeeds and was copied as
+  `nofrendo-batchcpu16.pdx` for the next batch-width comparison.
 
 ### Background tile CHR cache — only if DTCM becomes available
 
