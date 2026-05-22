@@ -25,7 +25,7 @@ static int playdate_update(void *ud) {
     int draw = (frame_num % FRAME_SKIP == 0);
 
     diag_frame_begin();
-    diag_render_begin();
+    diag_render_begin(draw);
     nes_renderframe(draw);
     diag_render_end();
     osd_getinput();

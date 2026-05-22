@@ -25,6 +25,7 @@
 
 
 #include <noftypes.h>
+#include <string.h>
 #include "nes6502.h"
 #include "dis6502.h"
 
@@ -1200,8 +1201,12 @@
 
 
 
+/* ITCM-relocated execute pointer — NULL until nes6502_itcm_init() sets it up */
+int (*nes6502_execute_ptr)(int total_cycles) = NULL;
+
 /* internal CPU context */
 static nes6502_context cpu;
+
 static int remaining_cycles = 0; /* so we can release timeslice */
 /* memory region pointers */
 static uint8 *ram = NULL, *stack = NULL;
@@ -1269,37 +1274,36 @@ INLINE void bank_writebyte(register uint32 address, register uint8 value)
    cpu.mem_page[address >> NES6502_BANKSHIFT][address & NES6502_BANKMASK] = value;
 }
 
-/* read a byte of 6502 memory */
+/* read a byte of 6502 memory — placed in .itcm so BL from nes6502_execute works */
+#ifdef __ELF__
+__attribute__((section(".itcm")))
+#endif
 static uint8 mem_readbyte(uint32 address)
 {
    nes6502_memread *mr;
 
-   /* TODO: following 2 cases are N2A03-specific */
-   if (address < 0x800)
-   {
-      /* RAM */
-      return ram[address];
-   }
-   else if (address >= 0x8000)
-   {
-      /* always paged memory */
+   /* ROM read first: most common case (data reads from lookup tables, etc.) */
+   if (address >= 0x8000)
       return bank_readbyte(address);
-   }
-   /* check memory range handlers */
-   else
+
+   /* NES RAM: $0000-$07FF (zero page, stack, game variables) */
+   if (address < 0x800)
+      return ram[address];
+
+   /* I/O space: PPU, APU, mapper regs — check memory range handlers */
+   for (mr = cpu.read_handler; mr->min_range != 0xFFFFFFFF; mr++)
    {
-      for (mr = cpu.read_handler; mr->min_range != 0xFFFFFFFF; mr++)
-      {
-         if (address >= mr->min_range && address <= mr->max_range)
-            return mr->read_func(address);
-      }
+      if (address >= mr->min_range && address <= mr->max_range)
+         return mr->read_func(address);
    }
 
-   /* return paged memory */
    return bank_readbyte(address);
 }
 
-/* write a byte of data to 6502 memory */
+/* write a byte of 6502 memory — placed in .itcm so BL from nes6502_execute works */
+#ifdef __ELF__
+__attribute__((section(".itcm")))
+#endif
 static void mem_writebyte(uint32 address, uint8 value)
 {
    nes6502_memwrite *mw;
@@ -1474,6 +1478,9 @@ uint32 nes6502_getcycles(bool reset_flag)
 ** Returns the number of cycles *actually* executed, which will be
 ** anywhere from zero to timeslice_cycles + 6
 */
+#ifdef __ELF__
+__attribute__((section(".itcm")))
+#endif
 int nes6502_execute(int timeslice_cycles)
 {
    int old_cycles = cpu.total_cycles;
@@ -2524,6 +2531,45 @@ end_execute:
 
    /* Return our actual amount of executed cycles */
    return (cpu.total_cycles - old_cycles);
+}
+
+/* Sentinel immediately after nes6502_execute — used to compute function size
+   for the ITCM copy at runtime. Must be in the same section. */
+#ifdef __ELF__
+__attribute__((section(".itcm"), used))
+#endif
+static void nes6502_execute_itcm_end(void) {}
+
+/* Copy nes6502_execute to physical ITCM and set nes6502_execute_ptr.
+**
+** ITCM_DEST = 0x00001000: skips the first 4 KB of ITCM which the Playdate OS
+** may use for exception vectors / fast code.  Our function (9.7 KB) fits in the
+** remaining 12 KB (0x00001000-0x00003FFF) of the 16 KB ITCM.
+**
+** The "address congruent mod 2" requirement (Thumb): the ELF places nes6502_execute
+** at an even address; 0x00001000 is even.  The function pointer uses +1 (Thumb bit).
+**
+** If this causes a HardFault on first boot, the OS is using that address range.
+** Try reducing ITCM_DEST (e.g. 0x00000400) or try 0x00000000 if VTOR != 0. */
+/* Copy .itcm section to heap SRAM and run from there.
+** Physical ITCM (0x00001000) is write-protected by the Playdate OS MPU.
+** Heap SRAM is the next best option: contiguous block, I-cache-hot once warm. */
+void nes6502_itcm_init(void *(*alloc_fn)(void *, size_t))
+{
+#ifdef __ELF__
+   extern char __itcm_start[], __itcm_end[];
+   size_t itcm_size = (size_t)(__itcm_end - __itcm_start);
+
+   void *base = alloc_fn(NULL, itcm_size + 31);
+   if (!base) return;
+   void *dest = (void *)(((uintptr_t)base + 31) & ~31UL);
+
+   memcpy(dest, __itcm_start, itcm_size);
+   __asm volatile ("dsb sy\n\t" "isb sy\n\t" ::: "memory");
+
+   uintptr_t fn_offset = ((uintptr_t)nes6502_execute & ~1UL) - (uintptr_t)__itcm_start;
+   nes6502_execute_ptr = (int (*)(int))((uintptr_t)dest + fn_offset + 1UL);
+#endif /* __ELF__ */
 }
 
 /* Issue a CPU Reset */

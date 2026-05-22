@@ -217,6 +217,7 @@ static uint8 oam_sl_idx[NES_SCREEN_HEIGHT][PPU_MAXSPRITE]; /* sprite indices, in
 static uint8 oam_pat1[64][16]; /* bitplane 0 for each sprite row */
 static uint8 oam_pat2[64][16]; /* bitplane 1 for each sprite row */
 
+
 static void mem_trash(uint8 *buffer, int length)
 {
    int i;
@@ -843,6 +844,7 @@ static void ppu_build_sprite_cache(void)
    }
 }
 
+
 /* TODO: fetch valid OAM a scanline before, like the Real Thing */
 static void ppu_renderoam(uint8 *vidbuf, int scanline)
 {
@@ -1097,7 +1099,7 @@ void ppu_scanline(uint8_t *bmp, int scanline, bool draw_flag)
 {
    if (scanline < 240)
    {
-      /* Rebuild the per-scanline sprite cache once per frame */
+      /* Rebuild caches once per frame at scanline 0 */
       if (0 == scanline)
          ppu_build_sprite_cache();
 

@@ -1,6 +1,6 @@
 SDK      ?= $(HOME)/Developer/PlaydateSDK
 TOOLCHAIN = $(SDK)/C_API/buildsupport/arm.cmake
-FLAGS     = -DCMAKE_BUILD_TYPE=Release -DAUDIO=ON -DDIAG=OFF -DPPU_BG=ON -DPPU_SPRITES=ON
+FLAGS     = -DCMAKE_BUILD_TYPE=Release -DAUDIO=ON -DDIAG=ON -DPPU_BG=ON -DPPU_SPRITES=ON
 PDUTIL    = $(SDK)/bin/pdutil
 PORT      ?= $(shell ls /dev/cu.usbmodem* 2>/dev/null | head -1)
 VOLUME    ?= /Volumes/PLAYDATE

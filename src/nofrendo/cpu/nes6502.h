@@ -102,6 +102,11 @@ extern "C" {
 /* Functions which govern the 6502's execution */
 extern void nes6502_reset(void);
 extern int nes6502_execute(int total_cycles);
+
+/* ITCM-relocated version of nes6502_execute.  NULL until nes6502_itcm_init()
+   is called from main.c at kEventInit.  nes.c uses this pointer if non-NULL. */
+extern int (*nes6502_execute_ptr)(int total_cycles);
+extern void nes6502_itcm_init(void *(*alloc_fn)(void *, size_t));
 extern void nes6502_nmi(void);
 extern void nes6502_irq(void);
 extern uint8 nes6502_getbyte(uint32 address);

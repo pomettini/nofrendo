@@ -1,7 +1,7 @@
 # Performance Notes — Nofrendo Playdate Port
 
 Running log of profiling data, findings, and optimization decisions.
-Target: **60 fps** (native NES NTSC speed). Current best: **~32 fps**.
+Target: **50 fps** (PAL NES speed). Current best: **~37 fps** idle, **27–33 fps** with enemies.
 
 ---
 
@@ -10,265 +10,200 @@ Target: **60 fps** (native NES NTSC speed). Current best: **~32 fps**.
 | | |
 |---|---|
 | CPU | ARM Cortex-M7 @ 168 MHz |
-| I-cache | 4 KB (Rev A) / 16 KB (Rev B) |
-| D-cache | 16 KB |
-| DTCM | 64 KB (instruction-side TCM) |
+| I-cache | 16 KB (Rev B confirmed) |
+| D-cache | 16 KB, 4-way set-associative |
+| ITCM | 16 KB at 0x00000000 — **MPU write-protected by OS** (see below) |
+| DTCM | 64 KB at 0x20000000 — accessible, but tested with no benefit (see below) |
 | Display | 400×240, 1-bit LCD |
 
 ---
 
 ## Profiling method
 
-`make diag` builds with `-DDIAG=1`. The update callback wraps each sub-component in
-`diag_render_begin/end` and `diag_blit_begin/end`. Results are logged via
-`pd->system->logToConsole` every 60 frames — visible in Playdate Mirror or
+`DIAG=ON` is now the **default** in `Makefile FLAGS`. The update callback measures each frame
+and logs via `pd->system->logToConsole` every 60 frames. Visible in Playdate Mirror or
 `/Data/System/eventlog.txt` on the device.
 
-**Do not use DWT (cycle counter at 0xE0001000 / 0xE000EDFC)** — those registers
-are debug-privileged and cause a HardFault on the Playdate device and a segfault
-on the simulator.
+**Important**: `diag_render_begin(bool draw_flag)` tracks two categories separately:
+- `cpu_only` = average ms for **render_false** frames (6502 + PPU state, no pixels)
+- `ppu_full` = average ms for **render_true** frames (6502 + PPU + pixel rendering)
 
 Sample output:
 ```
-[diag] frame=60    fps= 31  avg=31ms  render=28ms  blit=0μs  emu=28ms
+[diag] frame=300    fps= 37  avg=26ms  cpu_only=20ms  ppu_full=28ms
 ```
 
+**Do not use DWT cycle counter (0xE0001000 / 0xE000EDFC)** — debug-privileged registers,
+cause HardFault on device and segfault on simulator.
+
 ---
 
-## Confirmed bottleneck
+## Current best baseline — 2026-05-22
 
-`render` (= `nes_renderframe`) accounts for ~28 ms of the ~29 ms total frame budget.
-`blit` (our Bayer-dithered Playdate scanline write) measures < 1 ms — effectively free.
-`other` (input + audio fill + markUpdatedRows) ≈ 1 ms in production builds.
+Scene: Mario 1-1, standing still, no enemies visible. `FRAME_SKIP=2`, `AUDIO=ON`, `DIAG=ON`.
 
-**All remaining headroom is inside `nes_renderframe`, i.e., the NES emulation core.**
+| Scenario | fps | avg | cpu_only | ppu_full |
+|---|---:|---:|---:|---:|
+| Idle 1-1 (no enemies) | 37 | 26 ms | 20 ms | 28 ms |
+| Goombas on screen | 27–33 | 30–35 ms | 23–27 ms | 32–38 ms |
+| Hitting ? box (mushroom) | 29–30 | 32–33 ms | 24–25 ms | 34–35 ms |
 
-Breakdown (confirmed via profiling):
-- `blit` (our Bayer dithering, 240 scanlines): **~0 ms** — unmeasurable at 1 ms timer
-  resolution, confirmed free. Per-scanline timing calls added >4 ms overhead and
-  corrupted readings — do NOT measure blit per-scanline with ms-resolution timers.
-- `emu` = `render` − `blit` ≈ `render` ≈ **28 ms** — all time is in the NES core.
+**Key insight from split metrics**: The enemy slowdown is **entirely on the CPU side**.
+`ppu_full − cpu_only` stays constant at ~8 ms regardless of enemies. PPU rendering is NOT
+the bottleneck during enemy-heavy scenes.
 
-Measured internal breakdown (derived from `FRAME_SKIP=2` experiment — see below):
-- 6502 + PPU state machine (no pixel fill): **~24 ms** — dominant cost
-- PPU pixel rendering (`ppu_renderbg` + `ppu_renderoam` + blit): **~8 ms**
-- At 168 MHz, 24 ms = 4.0 M ARM cycles for 29,780 NES cycles → ~135 ARM cycles/NES cycle,
-  consistent with severe D-cache thrashing (each miss ≈ 30–50 cycles).
+**Root cause of enemy slowdown**: More objects → more diverse 6502 code paths executed per
+frame → NES ROM regions that weren't recently accessed → **D-cache misses**. The NES PRG ROM
+is 32 KB; the D-cache is only 16 KB. When Goomba AI and mushroom physics run, they read
+from different ROM regions than the idle game loop, evicting hot cache lines.
 
-Frame skip ceiling: even with every frame skipped (no pixel rendering), FPS is bounded
-by `1000 / 24 ms ≈ 41 fps`. Reaching 50 fps (PAL target) requires speeding up the
-6502 core itself — frame skip alone is not sufficient.
+**Path to 50 fps**: need avg ≤ 20 ms. Currently (20+28)/2 = 24 ms → 41 fps idle.
+Goomba case: (27+38)/2 = 32 ms → 31 fps. The 8 ms PPU cost and D-cache thrashing
+with enemies are the two remaining barriers.
 
-**Clean measured breakdown (FRAME_SKIP=999 test, 2026-05-21):**
+---
 
-| Component | Cost | How measured |
+## Confirmed cost breakdown
+
+| Component | Cost | Notes |
 |---|---:|---|
-| `render_false` (6502 + PPU state, no pixels) | **22 ms** | FRAME_SKIP=999 direct |
-| PPU pixel rendering (sprites + BG + blit) | **8 ms** | render_true − render_false |
-| `render_true` (full frame) | **30 ms** | derived |
-| `sound_fill_buffer` | **2 ms** | in `other` |
+| `cpu_only` (6502 + PPU state, no pixels) | **20 ms** | baseline idle |
+| PPU pixel rendering (BG + sprites + blit) | **8 ms** | ppu_full − cpu_only, constant |
+| `sound_fill_buffer` | ~2 ms | outside render measurement |
 
-Frame skip ceiling: `1000 / 22ms ≈ 45 fps` — never achievable with frame skip alone.
-50 fps requires `render_false < 16ms` → 27% speedup of the 6502 core.
+At 168 MHz, 20 ms = 3.36 M ARM cycles for ~29,780 NES cycles → **113 ARM cycles/NES cycle**.
+Theoretical minimum (168 MHz / 1.789 MHz) = 94 cycles/NES cycle. Overhead ≈ 20%.
 
-Current best: **FRAME_SKIP=1, ~30 fps** (every frame rendered, smooth 30fps display).
-
----
-
-## Profiling matrix — Super Mario Bros 1-1 (standardised scene)
-
-All measurements: device, Mario ROM, standing at start of 1-1, `FRAME_SKIP=2`, `AUDIO=ON`.
-`render` = average of render-true and render-false over 60-frame window.
-
-⚠️ **cmake cache contamination warning:** `PPU_SPRITES=OFF` and `PPU_BG=OFF` from
-`make diag-nosprites`/`make diag-nobg` persist in the cmake cache unless `FLAGS` in
-the Makefile explicitly passes `-DPPU_BG=ON -DPPU_SPRITES=ON`. Fixed. Remeasure after
-any cache-polluting build.
-
-| Build config | fps | render | other | delta vs baseline | true cost |
-|---|---:|---:|---:|---:|---|
-| Baseline (all on, corrected) | 33 | 27 ms | 3 ms | — | reference |
-| `DISABLE_PPU_BG` | — | — | — | needs remeasure |
-| `DISABLE_PPU_SPRITES` | — | — | — | needs remeasure |
-| `AUDIO=OFF` | — | — | — | needs remeasure |
-
-Previous matrix measurements were taken while `PPU_SPRITES=OFF` leaked from cmake cache —
-those numbers are invalidated and need to be redone with the fixed Makefile.
-
-Known reliable facts (no-audio was taken from a different session, believed clean):
-- Removing audio drops `render` by ~6 ms and `other` by ~3 ms → **APU total ≈ 9 ms/frame**
-- APU sample generation runs every frame (render-true AND render-false), not just on draw frames
-
-**Path to 50 fps (PAL target) with `FRAME_SKIP=2` — need avg render ≤ 20 ms:**
-- Cut APU cost in half → saves ~3 ms avg → 24 ms → 41 fps
-- APU + 6502 core improvements needed for 50 fps
+The ~20% overhead comes from: D-cache misses on NES ROM reads, function call overhead for
+`mem_readbyte`/`mem_writebyte`, and switch dispatch overhead.
 
 ---
 
 ## Optimisations applied (in order)
 
-### Compiler flags
-| Change | Effect |
-|---|---|
-| `-O3` override after SDK include | SDK sets `-O2` as PUBLIC; our extra `-O3` comes last on command line, wins |
-| `-Os -DNES6502_SWITCH` for `nes6502.c` only | Switches from threaded interpreter (computed gotos) to `while/switch` |
+### 1. Compiler flags
+- `-O3` global override (SDK sets `-O2` as PUBLIC; our `-O3` comes last, wins)
+- `-O2 -DNES6502_SWITCH` for `nes6502.c` only — switch dispatch vs computed gotos
 
-### 6502 dispatch: jumptable → switch
-`nes6502_execute` with computed gotos (`NES6502_JUMPTABLE`): **27 KB at -O3**.
-With `while/switch` dispatch + `-Os`: **13.5 KB**.
+### 2. 6502 dispatch: jumptable → switch (`-DNES6502_SWITCH`)
+`nes6502_execute` with computed gotos: **27 KB at -O3**. With `while/switch + -O2`: **~10 KB**.
+Rev B I-cache is 16 KB — entire execute function now fits.
 
-Rev B I-cache is 16 KB. At 13.5 KB the entire execute function now fits.
-Rev A (4 KB) cannot be fully cached regardless of approach.
+### 3. `-DNES6502_LEGAL_ONLY` — **saved ~8 ms**
+Removed ~62 undocumented opcode cases, replacing them with `ADD_CYCLES(n)` stubs.
+`nes6502_execute` shrank further; function fits comfortably in 16 KB I-cache.
+Before: ~34 fps. After: ~43 fps at the time.
 
-### Custom linker script (`link_map.ld`)
-`-ffunction-sections` (already enabled by SDK) puts each function in its own
-`.text.<name>` section. Our script pins the two hottest functions first in `.text`:
+### 4. `FRAME_SKIP=2` (`src/osd.c`)
+Alternates render_true / render_false frames. avg = (30+22)/2 = 26 ms → ~38 fps vs 29 fps
+with `FRAME_SKIP=1`. Game logic runs at full NES speed; only pixel output is halved.
 
-```ld
-. = ALIGN(32);  *(.text.nes6502_execute)   /* 13.5 KB */
-. = ALIGN(32);  *(.text.ppu_scanline)       /*  2.3 KB */
+### 5. `.itcm` section + heap copy (`nes6502_itcm_init`)
+`nes6502_execute`, `mem_readbyte`, `mem_writebyte` are placed in a `.itcm` ELF section.
+At startup, `nes6502_itcm_init` copies the section to a **heap SRAM block** and sets
+`nes6502_execute_ptr`. Ensures all three functions are **contiguous in SRAM**, improving
+I-cache utilization and eliminating BL-out-of-range issues.
+
+Physical ITCM at 0x00001000 is **MPU write-protected by the Playdate OS** (see failures below).
+Heap SRAM is the best available destination.
+
+### 6. Sprite pattern cache (`ppu_build_sprite_cache`)
+Pre-decodes CHR bitplanes for all 64 OAM sprites × 16 rows into `oam_pat1[64][16]` /
+`oam_pat2[64][16]` at scanline 0. `ppu_renderoam` reads from the cache instead of doing
+`PPU_MEM()` double-dereferences in the hot scanline loop.
+
+### 7. `mem_readbyte` ROM-first branch ordering
+Reordered the three branches in `mem_readbyte`: check `address >= 0x8000` (ROM, most common)
+before `address < 0x800` (RAM). Saves one comparison on every data read from ROM.
+
+### 8. `NES6502_PC_PTR` — **saved 2 ms on cpu_only** (22 ms → 20 ms)
+In switch mode the opcode dispatch becomes:
+```asm
+ldrb.w  r0, [pc_ptr], #1   ; *pc_ptr++ — 1 load
 ```
+instead of `bank_readbyte(PC++)` which requires a shift + 2 loads via the page table.
+`PC_REBASE()` is called at every non-sequential PC change (branches taken, JMP, JSR, RTS,
+RTI, BRK, NMI, IRQ). All sites verified correct. `pc_ptr` and `pc_bank_end` are kept in
+ARM registers across the switch body.
 
-Combined: 15.8 KB — **fits in the Rev B 16 KB I-cache** (with <200 bytes to spare).
-Both start at 32-byte boundaries (one full Cortex-M7 cache line).
+*Note: an earlier experiment listed this as "no measurable effect" — that was with `-Os`
+which did not keep `pc_ptr` in a register. At `-O2` it does, and the 2 ms saving is real
+and consistent across multiple test runs.*
 
-### Display dithering LUT
-`white4[4][256]` — one byte per (Bayer row, palette index) pair, precomputed in
-`vid_setpalette`. The inner loop per 8-pixel group:
-```c
-row[bx] = (w4[px[0]] & 0x80) | (w4[px[1]] & 0x40) | ... | (w4[px[7]] & 0x01);
-```
-8 AND + 7 OR, no branches, no comparisons. Confirmed ~0 ms overhead in profiling.
-
-### Fix: do NOT apply `-Os` to `nes_ppu.c`
-Tried `-Os` for `nes_ppu.c` to shrink `ppu_scanline` (2316 → 1884 bytes).
-`ppu_scanline` at 2316 bytes already fits in cache alongside the 6502.
-Result: **FPS dropped from 31 to 23** — `-Os` generated slower code with no cache benefit.
-**Reverted.**
-
-### Fix: do NOT use `-falign-functions=32` globally
-Bumping from SDK default (16) to 32 increases inter-function padding for every
-function in the binary, reducing code density and increasing cache pressure.
-**Reverted to SDK default (16).**
-
-### drawFPS in production
-`pd->system->drawFPS` costs ~2 ms per frame. Wrapped in `#ifdef DIAG` — only
-present in diagnostic builds.
-
-### Float promotion fix (`nes_pal.c`)
-`sin()`/`cos()` calls were implicitly promoting `float` arguments to `double`,
-pulling in 3 KB of software double-precision FP (`__kernel_rem_pio2`,
-`__adddf3`, `__muldf3`). Changed to `sinf()`/`cosf()`. Note: `__adddf3` and
-`__muldf3` are still linked because `apu_create` and `pal_generate` use `double`
-at startup — not a runtime hotspot.
+### 9. Split diag metrics
+`diag_render_begin(bool draw_flag)` tracks cpu_only and ppu_full separately.
+`DIAG=ON` is now the default in `Makefile FLAGS` — always-on, minimal overhead.
 
 ---
 
-## Function sizes (current build, device)
+## Optimisations tried that FAILED or REGRESSED
 
-```
-nes6502_execute   0x0000_0000   13 532 B   (first in .text, 32-byte aligned)
-ppu_scanline      0x0000_34e0    2 316 B   (immediately after, 32-byte aligned)
-ppu_scanline_blit 0x0000_cf40      212 B
-nes_renderframe   0x0000_8bXX      312 B
-```
+### ITCM physical placement (0x00001000)
+**Status**: Hard crash — MemManage fault.
+**Details**: CFSR=0x00000082 (DACCVIOL, MMARVALID), mmfar/bfar=0x00001000.
+The Playdate OS MPU marks ITCM as execute-only; `memcpy` to that address triggers a data
+access violation. There is no known API to request OS-managed ITCM placement.
 
----
+### First ITCM attempt (without `mem_readbyte`/`mem_writebyte` in `.itcm`)
+**Status**: Crashed silently at runtime (copy succeeded but code faulted).
+**Root cause**: `mem_readbyte` and `mem_writebyte` were not in `.itcm`. A `BL` from
+`nes6502_execute` at ITCM (~0x1000) to those functions in SRAM (~0x20010000) spans ~512 MB —
+exceeds the ±16 MB BL instruction range. Fixed by adding `__attribute__((section(".itcm")))`
+to both helpers. Verified with `objdump`: all BL targets within `.itcm`.
 
-## Optimisations tried that had no measurable effect
+### DTCM placement for `cpu` struct
+**Status**: No improvement; same or slightly worse fps.
+**Root cause**: The cpu struct is small and already D-cache hot. The bottleneck is NES ROM
+data reads (diverse, cache-missing), not cpu struct access.
 
-### PC host-pointer opcode fetch (`NES6502_PC_PTR`)
-Replaced `bank_readbyte(PC++)` in the opcode dispatch with `*pc_ptr++` (direct pointer
-into the current PRG bank). Added `PC_REBASE()` at every non-sequential PC change
-(branches taken, JMP, JSR, RTS, RTI, BRK, NMI, IRQ). Kept `bank_readbyte` for operand
-reads, only synced `pc_ptr` alongside `PC` in `IMMEDIATE_BYTE`, `ABSOLUTE_ADDR`, etc.
+### Background tile pattern cache (`bg_tile_cache[256][8]`, 4 KB)
+**Status**: **Regression** — cpu_only 20→22 ms, ppu_full 28→31 ms, fps 37→33.
+**Approach**: Pre-interleave `pat1`/`pat2` CHR bitplanes for all 256 tile indices × 8 rows.
+Replace 2 `PPU_MEM()` double-dereferences per tile in `ppu_renderbg` with one array lookup.
+**Root cause of regression**: The 4 KB static array adds D-cache pressure. After
+`ppu_renderbg` warms D-cache with cache entries, subsequent `nes6502_execute` calls
+(including on the **following** render_false frame, since D-cache state persists between
+frames) suffer more NES ROM cache misses. The PPU_MEM dereference savings are more than
+offset by increased 6502 D-cache miss cost.
+**Do not retry** unless a zero-D-cache-pressure destination (DTCM or ITCM) is available
+for the cache array.
 
-**Result: no measurable improvement.** render stayed at ~27 ms with the flag enabled.
-The theoretical saving (~2 ARM cycles per opcode dispatch) is real but too small to
-measure at 1 ms timer resolution (~0.2 ms/frame theoretical max). With `-Os`,
-the compiler does not keep `pc_ptr` in a register across the 256-case switch body, so
-the pointer must be reloaded on each dispatch anyway, eliminating the win.
+### `-Os` for `nes_ppu.c`
+Shrinks `ppu_scanline` but generates slower code — **fps dropped from 31 to 23**. Reverted.
 
-The infrastructure is still in the code (`NES6502_PC_PTR` flag in `nes6502.c`) but
-disabled in `CMakeLists.txt`. To re-enable for future experiments with a different
-optimisation level, add `-DNES6502_PC_PTR` back to `nes6502.c`'s `COMPILE_FLAGS`.
-
-### OAM sprite list precomputation (2024-05)
-`ppu_renderoam` previously iterated all 64 OAM sprites per scanline (262 × 64 = 16,768
-checks/frame), most failing the Y-range check immediately.
-
-Change: `ppu_build_sprite_cache()` runs once at scanline 0, building
-`oam_sl_count[240]` + `oam_sl_idx[240][8]` (2.1 KB static). `ppu_renderoam` now
-iterates only the pre-selected sprites: O(visible per scanline) vs O(64).
-
-**Result: no measurable difference.** The Y-range check loop overhead was ~0.5 ms
-(64 × ~5 cycles × 262 scanlines), which is invisible at ms resolution. The actual
-cost is the `draw_oamtile` work for sprites that DO overlap the scanline; optimising
-the miss path doesn't help when the hit path dominates.
-
-**Why render grows 28→30 ms during active play**: those 2 ms are `draw_oamtile`
-calls for the visible sprites, not the loop overhead.
-
----
-
-## Root cause hypothesis: D-cache pressure
-
-Hot data accessed per frame:
-- 6502 PRG ROM: 16 KB (every instruction fetch and data read)
-- CHR ROM (pattern tables): 8 KB (every background tile render)
-- Nametable VRAM: 4 KB (every background tile index read)
-- `ppu_t` struct: 5.2 KB (all fields accessed during rendering)
-
-**Total: ~33 KB competing for 16 KB D-cache.** Cache thrashing between PRG ROM and
-CHR ROM/PPU data is the likely dominant cost. The theoretical frame budget
-(~6–7 ms for pure computation) vs measured (28 ms) implies ~4× overhead — consistent
-with frequent D-cache misses where each miss costs ~30–50 ARM cycles.
+### `-falign-functions=32` globally
+Increases inter-function padding → reduces code density → more cache pressure. Reverted.
 
 ---
 
 ## What has NOT been tried yet
 
-### DTCM placement for `ppu` and `cpu` structs
-The global `ppu` struct (5.2 KB) and `nes6502_context cpu` are in BSS (regular RAM).
-Moving them to DTCM (tightly-coupled to the CPU, bypasses cache) could eliminate
-all D-cache misses for PPU field accesses. The Playdate's stack is reportedly
-already in DTCM — the "copy to stack" trick should get the benefit without linker
-changes.
+### Reduce PPU pixel cost (ppu_full − cpu_only = 8 ms)
+- `ppu_renderbg`: 33 tiles × 240 scanlines = 7,920 `draw_bgtile` calls per frame.
+  Each tile requires 2 `PPU_MEM()` double-dereferences for CHR data. A tile cache would
+  help here *if* it can be placed in DTCM or otherwise kept out of the D-cache pool.
+- `ppu_scanline_blit`: already fast (8 LUT lookups + 7 OR + 8 AND per 8 pixels, ~1 ms).
 
-To try: declare hot structs `__attribute__((section(".dtcm")))` and add a DTCM
-region to `link_map.ld`. Needs Playdate-specific memory map confirmation.
+### Reduce D-cache thrashing in enemy-heavy scenes
+The NES PRG ROM (32 KB) exceeds D-cache (16 KB). Goombas/mushrooms access different ROM
+regions than the idle game loop. Possible approaches (none tried yet):
+- Align PRG ROM load address to reduce cache set conflicts (requires SRAM layout control)
+- Batch `nes6502_execute` calls to reduce per-scanline cache flush-refill cycles
+- Profile which ROM addresses are most commonly accessed (requires DWT, not available)
 
-### Frame skip — IMPLEMENTED (`FRAME_SKIP 2` in `src/osd.c`)
-`nes_renderframe(false)` skips PPU pixel fills, running only the 6502 and PPU state.
-`display.c` now initialises `fb_data` unconditionally on first call so skipped frames
-show the last rendered frame (no white screen).
-
-**Result: 28 fps → 30–32 fps.** `render` drops from 32 ms to ~28 ms average (avg of
-render-true=32 ms and render-false=24 ms). Game logic speed unchanged. The game
-subjectively feels snappier.
-
-**Ceiling: ~41 fps** — frame skip cannot exceed `1000 / render(false) = 1000/24 ≈ 41 fps`
-regardless of skip ratio. To reach 50 fps, `render(false)` (6502 cost) must be reduced.
-
-### PPU tile/sprite rendering optimisation
-`ppu_renderbg` renders 32 background tiles per visible scanline using per-tile
-pattern table lookups. Opportunities: tile caching (reuse rendered tile if CHR
-data unchanged), SWAR pixel packing, or reduced palette lookups.
-
-### Per-function ITCM relocation
-Copy `nes6502_execute` and `ppu_scanline` to ITCM at startup using `memcpy` +
-function pointer patching (as described in the Playdate dev forum thread
-https://devforum.play.date/t/dirty-optimization-secrets-c-for-playdate/23011).
-ITCM bypasses the I-cache entirely; execution is deterministic.
+### `make diag-nobg` / `make diag-nosprites` matrix
+The profiling matrix in this file was partially invalidated by a cmake cache bug (now fixed:
+`-DPPU_BG=ON -DPPU_SPRITES=ON` in Makefile FLAGS). Needs a fresh run to get clean numbers.
 
 ---
 
 ## Build commands
 
 ```sh
-make                 # production build (no diagnostics)
-make diag            # diagnostic build — logs fps/render/blit/emu via logToConsole
+make                 # production build (DIAG=ON by default)
 make install         # build + push to connected device
-make install-diag    # diagnostic build + push
+make diag-nobg       # diagnostic build, bg rendering disabled
+make diag-nosprites  # diagnostic build, sprite rendering disabled
+make install-diag    # most recent diag build + push
 PORT=/dev/cu.XXX make install   # override auto-detected serial port
 ```

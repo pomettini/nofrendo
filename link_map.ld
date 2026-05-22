@@ -5,12 +5,15 @@ SECTIONS
 {
     .text :
     {
-        /* Hot emulation path: pin both functions at the start of .text, each
-           on its own 32-byte cache-line boundary.  Together they are ~15.8 KB
-           and just fit inside the Rev B 16 KB I-cache.
-           Requires -ffunction-sections (already set by the Playdate SDK). */
+        /* .itcm section: nes6502_execute marked for ITCM relocation.
+           Placed first in .text so __itcm_start/__itcm_end are easily computed.
+           At runtime, main.c copies this section to physical ITCM (0x00001000). */
         . = ALIGN(32);
-        *(.text.nes6502_execute)
+        __itcm_start = .;
+        *(.itcm)
+        __itcm_end = .;
+
+        /* ppu_scanline still pinned immediately after, cache-line aligned. */
         . = ALIGN(32);
         *(.text.ppu_scanline)
 

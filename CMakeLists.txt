@@ -122,7 +122,7 @@ if (TOOLCHAIN STREQUAL "armgcc")
     # nes6502_execute: -Os + switch dispatch → ~13 KB (fits Rev B 16 KB I-cache).
     set_source_files_properties(
         src/nofrendo/cpu/nes6502.c
-        PROPERTIES COMPILE_FLAGS "-O2 -DNES6502_SWITCH -DNES6502_LEGAL_ONLY"
+        PROPERTIES COMPILE_FLAGS "-O2 -DNES6502_SWITCH -DNES6502_LEGAL_ONLY -DNES6502_PC_PTR"
     )
     # nes_ppu.c stays at -O3: ppu_scanline (2.3 KB) already fits alongside
     # nes6502_execute in the 16 KB I-cache, so -Os would only make it slower.

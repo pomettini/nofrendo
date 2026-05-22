@@ -336,7 +336,7 @@ void nes_renderframe(bool draw_flag)
       if (241 == nes.scanline)
       {
          /* 7-9 cycle delay between when VINT flag goes up and NMI is taken */
-         elapsed_cycles = nes6502_execute(7);
+         elapsed_cycles = (nes6502_execute_ptr ? nes6502_execute_ptr : nes6502_execute)(7);
          nes.scanline_cycles -= elapsed_cycles;
          nes_checkfiq(elapsed_cycles);
 
@@ -351,7 +351,7 @@ void nes_renderframe(bool draw_flag)
          mapintf->hblank(in_vblank);
 
       nes.scanline_cycles += (float) NES_SCANLINE_CYCLES;
-      elapsed_cycles = nes6502_execute((int) nes.scanline_cycles);
+      elapsed_cycles = (nes6502_execute_ptr ? nes6502_execute_ptr : nes6502_execute)((int) nes.scanline_cycles);
       nes.scanline_cycles -= (float) elapsed_cycles;
       nes_checkfiq(elapsed_cycles);
 
