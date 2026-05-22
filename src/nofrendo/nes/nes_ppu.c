@@ -37,6 +37,7 @@
 #include <vid_drv.h>
 #include <nes_pal.h>
 #include <nesinput.h>
+#include "diag.h"
 
 
 /* PPU access */
@@ -1042,12 +1043,20 @@ static void ppu_renderscanline(uint8_t *buf, int scanline, bool draw_flag)
 
 #ifndef DISABLE_PPU_BG
    if (draw_flag)
-      ppu_renderbg(buf);
+   {
+      if (diag_ppu_bg_enabled())
+         ppu_renderbg(buf);
+      else
+         memset(buf, FULLBG, NES_SCREEN_WIDTH);
+   }
+#else
+   if (draw_flag)
+      memset(buf, FULLBG, NES_SCREEN_WIDTH);
 #endif
 
    /* TODO: fetch obj data 1 scanline before */
 #ifndef DISABLE_PPU_SPRITES
-   if (true == ppu.drawsprites && true == draw_flag)
+   if (true == ppu.drawsprites && true == draw_flag && diag_ppu_sprites_enabled())
       ppu_renderoam(buf, scanline);
    else
 #endif
@@ -1099,8 +1108,8 @@ void ppu_scanline(uint8_t *bmp, int scanline, bool draw_flag)
 {
    if (scanline < 240)
    {
-      /* Rebuild caches once per frame at scanline 0 */
-      if (0 == scanline)
+      /* Skipped frames only need the sprite-0 fake path below. */
+      if (0 == scanline && draw_flag)
          ppu_build_sprite_cache();
 
       /* Lower the Max Sprite per scanline flag */

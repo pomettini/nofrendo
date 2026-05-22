@@ -30,8 +30,12 @@ and logs via `pd->system->logToConsole` every 60 frames. Visible in Playdate Mir
 
 Sample output:
 ```
+[diag] build=2026-05-22 15:08:47 audio=off bg=on sprites=on
 [diag] frame=300    fps= 37  avg=26ms  cpu_only=20ms  ppu_full=28ms
 ```
+
+The banner includes the diagnostic build timestamp and the active audio, background, sprite,
+and scanline-blit flags. Check it before comparing a matrix row against the baseline.
 
 **Do not use DWT cycle counter (0xE0001000 / 0xE000EDFC)** — debug-privileged registers,
 cause HardFault on device and segfault on simulator.
@@ -176,22 +180,163 @@ Increases inter-function padding → reduces code density → more cache pressur
 
 ---
 
-## PPU cost breakdown — needs measurement
+## PPU cost breakdown — first matrix pass
 
-The 8 ms delta (ppu_full − cpu_only) is split across three components. We need actual numbers
-before optimising further. **Run these builds and record ppu_full in each:**
+The 8 ms delta (ppu_full − cpu_only) is split across three components. The first device
+matrix pass now has enough data to rank them:
 
 ```
-make diag-nosprites install-diag   # ppu_full_nosprites
-make diag-nobg install-diag        # ppu_full_nobg
+make install-diag-nosprites   # ppu_full_nosprites
+make install-diag-nobg        # ppu_full_nobg
+make install-diag-noblit      # ppu_full_noblit
+make install-diag-noaudio     # APU/audio cost row
 ```
+
+Use the matching install target. `make diag-nosprites install-diag` rebuilds the normal
+diagnostic build during `install-diag`, so it does not install the no-sprites PDX that was
+just built.
 
 Then:
-- `renderbg_cost  = ppu_full − ppu_full_nosprites`   (everything minus sprites)
-- `renderoam_cost = ppu_full − ppu_full_nobg`         (everything minus BG)
-- `blit_cost      = 8ms − renderbg_cost − renderoam_cost`
+- `renderoam_cost = ppu_full − ppu_full_nosprites`   (everything minus sprites)
+- `renderbg_cost  = ppu_full − ppu_full_nobg`        (everything minus BG)
+- `blit_cost      = ppu_full − ppu_full_noblit`
 
-Current hypothesis (unconfirmed): renderbg ≈ 6 ms, blit ≈ 1.5 ms, renderoam < 1 ms.
+Current measured direction:
+
+- The background-off boot/level-entry row cuts the steady audio-on PPU delta from about
+  8 ms to about 4 ms, so background pixel rendering is a material draw-frame cost.
+- The no-sprites Mario 1-1 row is within the current millisecond log noise.
+- The no-blit Mario 1-1 row is also within the current millisecond log noise. The
+  Playdate scanline conversion loop is not the first rendering target.
+
+### Profiling matrix setup — 2026-05-22
+
+The first matrix pass is ready for device logs:
+
+- `diag-nobg`, `diag-nosprites`, `diag-noblit`, and `diag-noaudio` all build locally.
+- Dedicated install targets now build and push the same variant in one step.
+- Profiling PDX installs use distinct package names beside the normal build:
+  `nofrendo-nobg.pdx`, `nofrendo-nosprites.pdx`, `nofrendo-noblit.pdx`, and
+  `nofrendo-noaudio.pdx`.
+- The normal diagnostic build also exposes Playdate menu checkmarks for `Draw BG` and
+  `Draw Sprites`. Reach the scene first, change a checkmark, and capture the following
+  `[diag] runtime bg=... sprites=...` marker with the log window.
+- `nofrendo-noaudio.pdx` was copied to the connected Playdate as the first handoff row.
+
+Use runtime menu cuts for same-scene exploratory logs. Keep the compile-time variants for
+clean matrix rows: they remove the render call at build time and the banner makes the row
+self-identifying.
+
+Record the first stable log window for the same gameplay scene used by the baseline:
+
+| Build | Scene | fps | avg | cpu_only | ppu_full | Status |
+|---|---|---:|---:|---:|---:|---|
+| `nofrendo-noaudio.pdx` | Mario 1-1 half-level traversal | 28–50 | 20–35 ms | 8–28 ms | 18–40 ms | measured |
+| `nofrendo-nosprites.pdx` | Mario 1-1 standing still | 37 | 26 ms | 19–20 ms | 28 ms | measured |
+| `nofrendo-noblit.pdx` | Mario 1-1 standing still | 36–37 | 26–27 ms | 19–20 ms | 27–29 ms | measured |
+| `nofrendo-nobg.pdx` | Boot into Mario 1-1 | 41–50 | 20–23 ms | 8–19 ms | 14–23 ms | measured, not playable |
+
+### Audio-off traversal — 2026-05-22
+
+Received device log banner:
+
+```
+[diag] build=2026-05-22 15:08:47 audio=off bg=on sprites=on
+```
+
+The first run covered about half of Mario 1-1 instead of fixed benchmark scenes, so use it
+as a traversal row rather than a strict before/after comparison with the audio-on baseline:
+
+| Segment in submitted log | fps | avg | cpu_only | ppu_full |
+|---|---:|---:|---:|---:|
+| Opening 240 frames | 41–42 | 23–24 ms | 17–18 ms | 25–28 ms |
+| Light windows around frames 300, 1020, and 2220 | 47–50 | 20–21 ms | 8–11 ms | 18–20 ms |
+| Busy traversal windows | 28–39 | 25–35 ms | 20–28 ms | 29–40 ms |
+
+Findings:
+
+- Audio off is a meaningful speed-first lever: the opening traversal windows get near the
+  50 fps budget on skipped visual frames, and some light windows reach 49–50 fps overall.
+- It is not enough for full-speed action. Busy windows still run at 28–39 fps with
+  `cpu_only` at 20–28 ms before full pixel rendering cost is added.
+- During this traversal, `ppu_full - cpu_only` is usually 9–12 ms. That is a little above
+  the earlier idle baseline delta of about 8 ms and makes the BG/sprite split the next
+  measurement to finish.
+- `nofrendo-nobg.pdx` is the next device row. It keeps audio on and sprites on while
+  disabling background rendering so `renderbg_cost` can be measured against the normal
+  diagnostic build.
+
+### Background-off boot path — 2026-05-22
+
+Received device log banner:
+
+```
+[diag] build=2026-05-22 15:18:27 audio=on bg=off sprites=on
+```
+
+The background-off build only showed horizontal glitching lines, so this row covered booting
+into Mario 1-1 rather than a level traversal:
+
+| Segment in submitted log | fps | avg | cpu_only | ppu_full | PPU delta |
+|---|---:|---:|---:|---:|---:|
+| Frames 60–360 | 43–44 | 22–23 ms | 18–19 ms | 22–23 ms | 4 ms |
+| Light windows at frames 420–480 | 48–50 | 20 ms | 8–9 ms | 14–15 ms | 6 ms |
+| Frames 540–720 | 41 | 23 ms | 19 ms | 23 ms | 4 ms |
+
+Findings:
+
+- The submitted background-off build was not a playable diagnostic view: it showed stale
+  horizontal glitch lines, so this row is useful for cost attribution only.
+- The diagnostic BG-disabled path now clears each drawn scanline instead of reusing stale
+  pixels. Verify that on device; the normal diagnostic build can also reach a scene first
+  and then disable `Draw BG` from the Playdate menu.
+- With audio on and sprites still enabled, the steady `ppu_full - cpu_only` cost drops to
+  about 4 ms. Compared with the earlier normal audio-on idle delta of about 8 ms, this
+  points to background pixel rendering costing roughly 4 ms in that comparison.
+- Background rendering is material, but this row still spends 22–23 ms per frame in the
+  steady boot and level-entry windows. The remaining CPU-side and non-background work still
+  need measurement and reduction for a stable 50 fps target.
+
+### Sprite-off Mario 1-1 — 2026-05-22
+
+The sprite-off build left the Mario 1-1 background visible and removed visible sprite
+drawing as expected:
+
+| Segment in submitted log | fps | avg | cpu_only | ppu_full |
+|---|---:|---:|---:|---:|
+| Level 1-1 standing still, frames 360–660 | 37 | 26 ms | 19–20 ms | 28 ms |
+| Level 1-1 moving, frames 840–1140 | 31–33 | 30–32 ms | 22–24 ms | 32–34 ms |
+
+Findings:
+
+- The standing-still row is effectively unchanged from the normal audio-on idle baseline:
+  both report 37 fps, 26 ms average frame time, and 28 ms full draw frames.
+- At the current millisecond logging resolution, visible `ppu_renderoam` work is within
+  noise in this scene. Do not prioritize sprite pixel drawing for the first 50 fps push.
+- This variant removes visible sprite rendering. Sprite-related state work that still runs
+  for skipped frames, such as sprite-0 handling, remains part of the CPU-side budget.
+- The moving row still lands around 22–24 ms on skipped visual frames and 32–34 ms on full
+  draw frames. That keeps the busy-scene CPU/cache path in front of sprite drawing.
+
+### Blit-off Mario 1-1 — 2026-05-22
+
+The blit-off build disables `ppu_scanline_blit()` after one-time framebuffer setup. It
+keeps the NES PPU scanline work and CPU work intact, so the view is not useful for normal
+play but the timing row isolates Playdate scanline conversion:
+
+| Segment in submitted log | fps | avg | cpu_only | ppu_full |
+|---|---:|---:|---:|---:|
+| Level 1-1 standing still, frames 420–660 | 36–37 | 26–27 ms | 19–20 ms | 27–29 ms |
+| Level 1-1 moving before first Goomba, frames 840–900 | 33–35 | 28–30 ms | 21–22 ms | 30–32 ms |
+
+Findings:
+
+- Standing still is effectively unchanged from both the normal baseline and the no-sprites
+  row at the current log resolution.
+- Moving still costs 21–22 ms on skipped visual frames before pixel output is considered.
+- Do not spend the first optimization pass on the Playdate scanline conversion loop. The
+  next speed work should either reduce the CPU/emulation side of busy frames or attack
+  background rendering, which is the PPU component with a measured delta so far.
 
 ### Why YOFFSET = 0 matters
 
@@ -201,7 +346,7 @@ must be rendered. Scanline-count reduction is not an option.
 
 ---
 
-## What has NOT been tried yet
+## Next experiments and open work
 
 ### Reduce ppu_renderbg register pressure (estimated 0.5–1 ms savings)
 
@@ -237,6 +382,45 @@ approaches (none tried yet):
 - Align PRG ROM base address in SRAM to a 16 KB boundary to minimise 4-way set conflicts
 - Batch `nes6502_execute` calls (fewer but larger calls → less per-call cache-warmup overhead)
 
+### Direct PC byte operand fetch experiment — no clear win
+
+`NES6502_PC_PTR` already uses a direct host pointer for opcode dispatch and saved about
+2 ms on `cpu_only`. The first follow-up experiment routed `IMMEDIATE_BYTE` through a
+direct `pc_ptr` byte fetch with a rare 4 KB bank-boundary rebase guard. That covered
+immediates, branch offsets, and the byte operand consumed by zero-page addressing modes.
+
+The device row from `nofrendo-pcbyte.pdx`:
+
+| Segment in submitted log | fps | avg | cpu_only | ppu_full |
+|---|---:|---:|---:|---:|
+| Level 1-1 standing still, frames 360–600 | 37 | 26 ms | 19 ms | 28 ms |
+| Level 1-1 moving before busy enemy windows, frames 1860–2040 | 33 | 29–30 ms | 21–22 ms | 32 ms |
+| Goombas appearing, frames 2100–2220 | 28–29 | 33–35 ms | 24–26 ms | 36–38 ms |
+
+Findings:
+
+- The standing row matches the normal baseline.
+- The moving row stays in the same busy-scene range as earlier traversal logs.
+- The change kept `nes6502_execute` around 12.7 KB, but it did not produce a clear device
+  win. It was reverted before trying wider PC operand fetch changes.
+
+### Skip sprite render cache on skipped frames — pending device row
+
+`ppu_build_sprite_cache()` precomputes scanline sprite lists and CHR pattern rows for
+visible sprite rendering. `FRAME_SKIP=2` means every other frame intentionally skips that
+rendering, but the cache was still rebuilt at scanline 0 on those skipped frames. The
+skipped frame only uses `ppu_fakeoam()` for the sprite-0 path, which reads raw sprite data
+directly and does not consume the render cache.
+
+The next speed-first experiment rebuilds the sprite render cache only when `draw_flag` is
+true. That should affect `cpu_only` rather than draw-frame sprite pixels. Keep it if the
+Mario 1-1 standing and moving rows improve without visible behavior changes on draw frames.
+
+Build status on 2026-05-22:
+
+- `make` succeeds for device and simulator packages.
+- The build was copied to the device as `nofrendo-skipcache.pdx`.
+
 ### Background tile CHR cache — only if DTCM becomes available
 
 The 4 KB `bg_tile_cache[256][8]` approach was tried and **caused regression** (see failures
@@ -271,6 +455,11 @@ make                 # production build (DIAG=ON by default)
 make install         # build + push to connected device
 make diag-nobg       # diagnostic build, bg rendering disabled
 make diag-nosprites  # diagnostic build, sprite rendering disabled
-make install-diag    # most recent diag build + push
+make diag-noblit     # diagnostic build, Playdate scanline blit disabled
+make diag-noaudio    # diagnostic build, audio disabled
+make install-diag-nobg       # build + push nofrendo-nobg.pdx
+make install-diag-nosprites  # build + push nofrendo-nosprites.pdx
+make install-diag-noblit     # build + push nofrendo-noblit.pdx
+make install-diag-noaudio    # build + push nofrendo-noaudio.pdx
 PORT=/dev/cu.XXX make install   # override auto-detected serial port
 ```

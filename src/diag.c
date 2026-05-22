@@ -9,6 +9,30 @@ extern PlaydateAPI *pd;
 
 #define WINDOW 60
 
+#if AUDIO
+#define DIAG_AUDIO "on"
+#else
+#define DIAG_AUDIO "off"
+#endif
+
+#ifdef DISABLE_PPU_BG
+#define DIAG_BG "off"
+#else
+#define DIAG_BG "on"
+#endif
+
+#ifdef DISABLE_PPU_SPRITES
+#define DIAG_SPRITES "off"
+#else
+#define DIAG_SPRITES "on"
+#endif
+
+#ifdef DISABLE_PPU_BLIT
+#define DIAG_BLIT "off"
+#else
+#define DIAG_BLIT "on"
+#endif
+
 static uint32_t window_start  = 0;
 static uint32_t render_start  = 0;
 static uint32_t render_accum  = 0;
@@ -21,10 +45,42 @@ static bool     current_draw  = false;
 static int      idx           = 0;
 static int      total         = 0;
 static bool     initialized   = false;
+static bool     ppu_bg_enabled = true;
+static bool     ppu_sprites_enabled = true;
+
+static const char *diag_onoff(bool enabled) {
+    return enabled ? "on" : "off";
+}
+
+bool diag_ppu_bg_enabled(void) {
+    return ppu_bg_enabled;
+}
+
+bool diag_ppu_sprites_enabled(void) {
+    return ppu_sprites_enabled;
+}
+
+void diag_set_ppu_bg_enabled(bool enabled) {
+    ppu_bg_enabled = enabled;
+    pd->system->logToConsole("[diag] runtime bg=%s sprites=%s",
+                             diag_onoff(ppu_bg_enabled),
+                             diag_onoff(ppu_sprites_enabled));
+}
+
+void diag_set_ppu_sprites_enabled(bool enabled) {
+    ppu_sprites_enabled = enabled;
+    pd->system->logToConsole("[diag] runtime bg=%s sprites=%s",
+                             diag_onoff(ppu_bg_enabled),
+                             diag_onoff(ppu_sprites_enabled));
+}
 
 void diag_frame_begin(void) {
     if (!initialized) {
-        pd->system->logToConsole("[diag] build=" BUILD_TIMESTAMP);
+        pd->system->logToConsole("[diag] build=" BUILD_TIMESTAMP
+                                 " audio=" DIAG_AUDIO
+                                 " bg=" DIAG_BG
+                                 " sprites=" DIAG_SPRITES
+                                 " blit=" DIAG_BLIT);
         window_start = pd->system->getCurrentTimeMilliseconds();
         initialized  = true;
     }

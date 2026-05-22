@@ -63,6 +63,13 @@ void ppu_scanline_blit(uint8_t *bmp, int scanline, bool draw_flag) {
         memset(fb_data, 0x00, LCD_ROWSIZE * LCD_ROWS);
     }
 
+#ifdef DISABLE_PPU_BLIT
+    (void)bmp;
+    (void)scanline;
+    (void)draw_flag;
+    return;
+#endif
+
     if (!draw_flag || scanline < 0 || scanline >= NES_SCREEN_HEIGHT)
         return;
 

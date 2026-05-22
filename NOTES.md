@@ -1,6 +1,8 @@
 # NOTES.md
 
-NES emulator (Nofrendo core) port to Playdate, targeting full-speed 60 fps NTSC.
+NES emulator (Nofrendo core) port to Playdate. Current performance target: full-speed
+50 fps PAL-like gameplay first; visual quality and accuracy can trail while speed is
+being established.
 
 ## Target hardware
 
@@ -22,7 +24,10 @@ NES emulator (Nofrendo core) port to Playdate, targeting full-speed 60 fps NTSC.
 
 **1-bit display.** The NES outputs 256×240 at 64 colors. The Playdate screen is 400×240 monochrome. The image fits centered (72px padding on each side). Color-to-1-bit conversion via ordered (Bayer) dithering is the most practical approach at this CPU budget — threshold dithering per scanline with a precomputed luminance LUT.
 
-**Audio.** The APU is compiled out by default (`AUDIO=1` to enable). Playdate uses a pull-model audio callback (`pd->sound->addSource`). The APU fills a buffer; the callback drains it. Sample rate: 22050 Hz mono, 8-bit (matches the existing `osd_getsoundinfo` stub).
+**Audio.** The APU is enabled by the current Makefile and can be compiled out with
+`AUDIO=OFF` for profiling. Playdate uses a pull-model audio callback
+(`pd->sound->addSource`). The APU fills a buffer; the callback drains it. Sample rate:
+22050 Hz mono, 8-bit (matches the existing `osd_getsoundinfo` stub).
 
 **ROM loading.** Playdate reads files from the data folder on the SD card via `pd->file->open`. The ROM path should be hardcoded as `"cartridge.nes"` initially, matching the NumWorks convention.
 

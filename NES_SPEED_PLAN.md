@@ -1,25 +1,29 @@
 # Native NES Speed Plan for Playdate
 
-Goal: get the Playdate port close to native NES speed, ideally 60 Hz NTSC game
-logic with acceptable audio and video. This document orders the work by a mix of
-feasibility, expected performance boost, and risk.
+Goal: get the Playdate port to full-speed gameplay first. The immediate target is
+50 fps PAL-like NES speed; frame skipping, visual artifacts, and emulation
+inaccuracies are acceptable while establishing that speed. This document orders
+the work by a mix of feasibility, expected performance boost, and risk.
 
 ## Current Baseline
 
-Native NTSC timing means one emulated NES frame every 16.67 ms. Current profiling
-in `PERF.md` puts this port roughly here:
+The 50 fps target means one emulated NES frame every 20 ms. Current profiling in
+`PERF.md` puts this port roughly here:
 
 | Mode | Approx cost | Approx ceiling |
 |---|---:|---:|
-| Full frame render | 28-32 ms | 31-36 fps |
-| Skipped visual frame | 24 ms | 41 fps |
-| PPU pixel drawing portion | 8 ms | N/A |
-| Playdate framebuffer blit/dither | <1 ms | N/A |
+| Idle full render frame | 28 ms | 35 fps |
+| Idle skipped visual frame | 20 ms | 50 fps boundary |
+| Enemy-heavy full render frame | 32-38 ms | 26-31 fps |
+| Enemy-heavy skipped visual frame | 23-27 ms | 37-43 fps |
+| PPU pixel drawing portion | about 8 ms | N/A |
+| `sound_fill_buffer` | about 2 ms | outside render metric |
 
-The important conclusion is that the Playdate display path is no longer the
-main bottleneck. Even if pixel rendering is skipped forever, the emulator core
-still cannot reach NTSC speed. The first serious target is therefore reducing
-the 6502 plus PPU state-machine cost from about 24 ms to below 16.67 ms.
+The important conclusion is narrower now. Skipping pixel output can put the idle
+scene on the 50 fps boundary, but action scenes still miss it before a full
+visual frame is drawn. The first pass should therefore measure the easy
+subsystem cuts and then attack the CPU-side enemy-scene cost and the remaining
+about 8 ms of PPU pixel work.
 
 ## Guiding Rule
 
@@ -49,24 +53,23 @@ Playdate)" is directly relevant to this port. The main takeaways to apply here:
   tiny proofs, use canaries for stack-based DTCM pools, and flush I-cache after
   copying executable code.
 
-## 1. Fix Build Hygiene and Measurement
+## 1. Keep Build Hygiene and Measurement Honest
 
 Feasibility: very high
 Expected boost: 0-2 ms, mostly from avoiding accidental diagnostic overhead
 Risk: very low
 
-Normal builds should force `DIAG=OFF`. Right now `make diag` can leave
-`DIAG=ON` in the CMake cache, and a later `make` can continue building with
-`pd->system->drawFPS`, logging, and diagnostic state. That can make production
-numbers look worse than they are.
+During performance work, the current Makefile intentionally keeps `DIAG=ON` so
+device logs are available. Treat those numbers as diagnostic measurements and
+keep every row labeled with its active flags. Before release claims or
+production comparisons, build an explicit `DIAG=OFF` package too.
 
 Do this first:
 
-- Change the Makefile so production config passes `-DDIAG=OFF`.
-- Keep `diag` as the only target that passes `-DDIAG=ON`.
-- Add a small note to `PERF.md`: after changing diagnostic flags, run a clean
-  configure or force the option.
-- Log the final compile defines in the diagnostic banner if practical.
+- Keep diagnostic banners self-identifying.
+- Keep production and diagnostic build targets explicit.
+- After changing diagnostic flags, run a clean configure or force the option.
+- Log matrix rows in `PERF.md` with their audio, background, and sprite settings.
 
 Measure:
 
@@ -112,6 +115,32 @@ Measure:
 
 Output should be a table in `PERF.md`. This tells you which branch of the plan
 is actually worth the next week.
+
+Current repo status on 2026-05-22: the audio-off, background-off,
+sprites-off, and blit-off diagnostic builds have matching install targets, and
+their log banner reports the active flags. The normal diagnostic build also has
+`Draw BG` and `Draw Sprites` system-menu checkmarks so a scene can be reached
+before a visual path is cut; the runtime marker belongs in the captured log
+window. Keep the compile-time variants for clean matrix rows. The first
+audio-off Mario 1-1 traversal reached 49-50 fps in light windows but still fell
+to 28-39 fps in busy windows, so audio off alone does not reach the speed target.
+The no-background boot row drops the steady audio-on PPU delta to about 4 ms;
+compared with the earlier roughly 8 ms normal idle delta, that points to
+background rendering as a material cost. The BG-disabled diagnostic draw path
+now fills blank scanlines instead of leaving stale scanline noise, but that needs
+device verification. The no-sprites Mario 1-1 standing row is effectively
+unchanged from the normal idle row at millisecond log resolution, and its moving
+row still misses the budget. The no-blit Mario 1-1 row is also effectively
+unchanged: standing still still reports 36-37 fps and moving still spends
+21-22 ms on skipped visual frames. That makes visible sprite pixel drawing and
+Playdate scanline conversion low priorities for the first 50 fps push.
+Background rendering is the PPU cost with a measured delta so far, but the next
+immediate work should improve the busy-scene CPU/emulation path because it
+already misses the 20 ms budget before full pixel drawing. The first follow-up
+CPU experiment extended the existing `pc_ptr` fast path to byte operands, but the
+same-scene device row was flat and that change was dropped. The next experiment
+removes skipped-frame sprite render-cache rebuild work that those no-draw frames
+cannot use.
 
 ## 3. I-Cache: Shrink and Isolate Hot Interpreter Code
 
@@ -162,29 +191,35 @@ Measure:
 This is now the first hard optimization because it can improve speed without
 changing emulator semantics.
 
-## 4. CPU Core: Replace PC Address Fetch With a Host Pointer Fast Path
+## 4. CPU Core: Finish the Host Pointer PC Fetch Path
 
 Feasibility: medium
-Expected boost: high, likely 3-8 ms if done well
+Expected boost: medium, likely 1-4 ms after the opcode-fetch win
 Risk: medium-high
 
-The current interpreter repeatedly fetches opcodes through:
+The current interpreter already uses a host `pc_ptr` for opcode dispatch. That
+removed one bank-table lookup from the hottest sequential fetch path and the
+measured `NES6502_PC_PTR` build saved about 2 ms on `cpu_only`.
+
+The addressing macros still fetch many byte and word operands through:
 
 ```c
 cpu.mem_page[address >> NES6502_BANKSHIFT][address & NES6502_BANKMASK]
 ```
 
-That is flexible, but expensive. Most CPU time is spent fetching sequential
-opcodes from the same 4 KB bank. A fast interpreter should keep:
+That is flexible, but expensive for sequential instruction operands that are
+usually beside the opcode in the same 4 KB bank. Keep using:
 
 - `pc_addr`: the emulated 16-bit PC.
 - `pc_ptr`: direct host pointer into the current PRG bank.
 - `pc_bank_end`: pointer limit for the current mapped bank.
 
-Then the common opcode fetch becomes:
+Then a common byte operand fetch can become:
 
 ```c
-opcode = *pc_ptr++;
+if (pc_ptr == pc_bank_end)
+    rebase_pc_ptr();
+operand = *pc_ptr++;
 pc_addr++;
 ```
 
@@ -198,18 +233,19 @@ Only slow paths need to rebase `pc_ptr`:
 
 Why this is still a top CPU optimization:
 
-- It attacks the 24 ms no-draw ceiling.
+- It attacks the 21-24 ms busy no-draw ceiling after the opcode fetch win.
 - It reduces memory indirection and D-cache pressure in the hottest loop.
 - It can be done while preserving Nofrendo's basic interpreter structure.
 
 Implementation strategy:
 
-- Prototype in a branch, not mixed with PPU changes.
-- Add a helper to rebase `pc_ptr` from `pc_addr`.
 - Keep the existing `bank_readbyte()` path for data reads at first.
-- Convert only opcode and immediate operand fetches initially.
-- Run a known-good ROM and compare input responsiveness, frame count, and basic
-  game behavior before broadening compatibility.
+- Convert byte operands first; they cover immediates, branch offsets, and the
+  one-byte addresses used by zero-page addressing modes.
+- Measure code size as well as frame time. A wider direct-fetch macro is a loss
+  if it pushes the interpreter out of the useful instruction-cache footprint.
+- Consider word operands next only if the byte form is a real device win and
+  the rare bank-boundary case stays correct.
 
 Measure:
 

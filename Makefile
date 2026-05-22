@@ -1,11 +1,14 @@
 SDK      ?= $(HOME)/Developer/PlaydateSDK
 TOOLCHAIN = $(SDK)/C_API/buildsupport/arm.cmake
-FLAGS     = -DCMAKE_BUILD_TYPE=Release -DAUDIO=ON -DDIAG=ON -DPPU_BG=ON -DPPU_SPRITES=ON
+FLAGS     = -DCMAKE_BUILD_TYPE=Release -DAUDIO=ON -DDIAG=ON -DPPU_BG=ON -DPPU_SPRITES=ON -DPPU_BLIT=ON
 PDUTIL    = $(SDK)/bin/pdutil
 PORT      ?= $(shell ls /dev/cu.usbmodem* 2>/dev/null | head -1)
 VOLUME    ?= /Volumes/PLAYDATE
+PDX_DEST  ?= nofrendo.pdx
 
-.PHONY: all device sim clean rebuild diag install install-diag
+.PHONY: all device sim clean rebuild diag diag-nobg diag-nosprites diag-noblit diag-noaudio \
+	install install-diag install-diag-nobg install-diag-nosprites install-diag-noblit \
+	install-diag-noaudio
 
 # Build device first so pdex.elf lands in Source/ before sim runs pdc
 all: device sim
@@ -31,7 +34,6 @@ diag:
 	cmake --build build/sim
 
 # Profiling matrix targets — build diag with one subsystem disabled at a time.
-# Usage: make diag-nobg / diag-nosprites / diag-noaudio, then make install-diag.
 diag-nobg:
 	cmake -B build/device -DTOOLCHAIN=armgcc -DCMAKE_TOOLCHAIN_FILE=$(TOOLCHAIN) $(FLAGS) -DDIAG=ON -DPPU_BG=OFF
 	cmake --build build/device
@@ -42,6 +44,12 @@ diag-nosprites:
 	cmake -B build/device -DTOOLCHAIN=armgcc -DCMAKE_TOOLCHAIN_FILE=$(TOOLCHAIN) $(FLAGS) -DDIAG=ON -DPPU_SPRITES=OFF
 	cmake --build build/device
 	cmake -B build/sim $(FLAGS) -DDIAG=ON -DPPU_SPRITES=OFF
+	cmake --build build/sim
+
+diag-noblit:
+	cmake -B build/device -DTOOLCHAIN=armgcc -DCMAKE_TOOLCHAIN_FILE=$(TOOLCHAIN) $(FLAGS) -DDIAG=ON -DPPU_BLIT=OFF
+	cmake --build build/device
+	cmake -B build/sim $(FLAGS) -DDIAG=ON -DPPU_BLIT=OFF
 	cmake --build build/sim
 
 diag-noaudio:
@@ -55,11 +63,19 @@ _push:
 	@echo "Mounting $(PORT)..."
 	$(PDUTIL) $(PORT) datadisk
 	@sleep 3
-	@echo "Copying nofrendo.pdx..."
-	cp -r nofrendo.pdx $(VOLUME)/Games/
+	@echo "Copying nofrendo.pdx to $(PDX_DEST)..."
+	cp -R nofrendo.pdx $(VOLUME)/Games/$(PDX_DEST)
 	diskutil eject $(VOLUME)
-	@echo "Done. nofrendo.pdx installed on device."
+	@echo "Done. $(PDX_DEST) installed on device."
 
 install: all _push
 
 install-diag: diag _push
+install-diag-nobg: PDX_DEST = nofrendo-nobg.pdx
+install-diag-nobg: diag-nobg _push
+install-diag-nosprites: PDX_DEST = nofrendo-nosprites.pdx
+install-diag-nosprites: diag-nosprites _push
+install-diag-noblit: PDX_DEST = nofrendo-noblit.pdx
+install-diag-noblit: diag-noblit _push
+install-diag-noaudio: PDX_DEST = nofrendo-noaudio.pdx
+install-diag-noaudio: diag-noaudio _push
