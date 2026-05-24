@@ -40,6 +40,7 @@
 #include <nes_mmc.h>
 #include <vid_drv.h>
 #include <nofrendo.h>
+#include "diag.h"
 
 #define  NES_CLOCK_DIVIDER    12
 //#define  NES_MASTER_CLOCK     21477272.727272727272
@@ -338,12 +339,19 @@ void nes_renderframe(bool draw_flag)
    if (cpu_batch_lines < 1)
       cpu_batch_lines = 1;
 
+#define EXECUTE_CPU_TIMED(cycles_) \
+   do { \
+      diag_cpu_execute_begin(); \
+      elapsed_cycles = execute_cpu((int) (cycles_)); \
+      diag_cpu_execute_end(); \
+   } while (0)
+
    while (262 != nes.scanline)
    {
       /* Visible-line work must finish before vblank raises its status bit. */
       if (241 == nes.scanline && pending_cpu_lines)
       {
-         elapsed_cycles = execute_cpu((int) nes.scanline_cycles);
+         EXECUTE_CPU_TIMED(nes.scanline_cycles);
          nes.scanline_cycles -= (float) elapsed_cycles;
          nes_checkfiq(elapsed_cycles);
          pending_cpu_lines = 0;
@@ -355,7 +363,7 @@ void nes_renderframe(bool draw_flag)
       if (241 == nes.scanline)
       {
          /* 7-9 cycle delay between when VINT flag goes up and NMI is taken */
-         elapsed_cycles = execute_cpu(7);
+         EXECUTE_CPU_TIMED(7);
          nes.scanline_cycles -= elapsed_cycles;
          nes_checkfiq(elapsed_cycles);
 
@@ -373,7 +381,7 @@ void nes_renderframe(bool draw_flag)
       pending_cpu_lines++;
       if (pending_cpu_lines >= cpu_batch_lines || 241 == nes.scanline)
       {
-         elapsed_cycles = execute_cpu((int) nes.scanline_cycles);
+         EXECUTE_CPU_TIMED(nes.scanline_cycles);
          nes.scanline_cycles -= (float) elapsed_cycles;
          nes_checkfiq(elapsed_cycles);
          pending_cpu_lines = 0;
@@ -385,10 +393,12 @@ void nes_renderframe(bool draw_flag)
 
    if (pending_cpu_lines)
    {
-      elapsed_cycles = execute_cpu((int) nes.scanline_cycles);
+      EXECUTE_CPU_TIMED(nes.scanline_cycles);
       nes.scanline_cycles -= (float) elapsed_cycles;
       nes_checkfiq(elapsed_cycles);
    }
+
+#undef EXECUTE_CPU_TIMED
 
    nes.scanline = 0;
 }

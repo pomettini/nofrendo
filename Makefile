@@ -1,6 +1,6 @@
 SDK      ?= $(HOME)/Developer/PlaydateSDK
 TOOLCHAIN = $(SDK)/C_API/buildsupport/arm.cmake
-FLAGS     = -DCMAKE_BUILD_TYPE=Release -DAUDIO=ON -DDIAG=ON -DPPU_BG=ON -DPPU_SPRITES=ON -DPPU_BLIT=ON -DALIGN_PRG_ROM=OFF -DNES_CPU_BATCH_SCANLINES=1 -DNES6502_OPT_LEVEL=O3 -DNES6502_ALIGN_LOOPS=OFF
+FLAGS     = -DCMAKE_BUILD_TYPE=Release -DAUDIO=ON -DDIAG=ON -DPPU_BG=ON -DPPU_SPRITES=ON -DPPU_BLIT=ON -DALIGN_PRG_ROM=OFF -DNES_CPU_BATCH_SCANLINES=1 -DNES6502_OPT_LEVEL=O3 -DNES6502_ALIGN_LOOPS=OFF -DNES6502_SPINHACK=OFF -DNES6502_OPPROFILE=OFF -DNES6502_FAST_PC_OPS=OFF -DNES6502_HOTOPS=OFF
 PDUTIL    = $(SDK)/bin/pdutil
 PORT      ?= $(shell ls /dev/cu.usbmodem* 2>/dev/null | head -1)
 VOLUME    ?= /Volumes/PLAYDATE
@@ -8,9 +8,9 @@ PDX_DEST  ?= nofrendo.pdx
 CPU_BATCH ?= 8
 CPU_OPT   ?= O3
 
-.PHONY: all device sim clean rebuild diag diag-batchcpu diag-alignrom diag-cpuopt diag-cpualign diag-nobg diag-nosprites diag-noblit diag-noaudio \
+.PHONY: all device sim clean rebuild diag diag-batchcpu diag-alignrom diag-cpuopt diag-cpualign diag-spinhack diag-opprofile diag-fastpc diag-hotops diag-nobg diag-nosprites diag-noblit diag-noaudio \
 	install install-diag install-diag-nobg install-diag-nosprites install-diag-noblit \
-	install-diag-noaudio install-diag-batchcpu install-diag-alignrom install-diag-cpuopt install-diag-cpualign
+	install-diag-noaudio install-diag-batchcpu install-diag-alignrom install-diag-cpuopt install-diag-cpualign install-diag-spinhack install-diag-opprofile install-diag-fastpc install-diag-hotops
 
 # Build device first so pdex.elf lands in Source/ before sim runs pdc
 all: device sim
@@ -63,6 +63,34 @@ diag-cpualign:
 	cmake -B build/sim $(FLAGS) -DDIAG=ON -DNES_CPU_BATCH_SCANLINES=16 -DNES6502_OPT_LEVEL=O3 -DNES6502_ALIGN_LOOPS=ON
 	cmake --build build/sim
 
+# Fast-forward exact PPUSTATUS wait loops on top of the current best CPU baseline.
+diag-spinhack:
+	cmake -B build/device -DTOOLCHAIN=armgcc -DCMAKE_TOOLCHAIN_FILE=$(TOOLCHAIN) $(FLAGS) -DDIAG=ON -DNES_CPU_BATCH_SCANLINES=16 -DNES6502_OPT_LEVEL=O3 -DNES6502_SPINHACK=ON
+	cmake --build build/device
+	cmake -B build/sim $(FLAGS) -DDIAG=ON -DNES_CPU_BATCH_SCANLINES=16 -DNES6502_OPT_LEVEL=O3 -DNES6502_SPINHACK=ON
+	cmake --build build/sim
+
+# Count the opcode mix in each 60-frame diagnostic window.
+diag-opprofile:
+	cmake -B build/device -DTOOLCHAIN=armgcc -DCMAKE_TOOLCHAIN_FILE=$(TOOLCHAIN) $(FLAGS) -DDIAG=ON -DNES_CPU_BATCH_SCANLINES=16 -DNES6502_OPT_LEVEL=O3 -DNES6502_OPPROFILE=ON
+	cmake --build build/device
+	cmake -B build/sim $(FLAGS) -DDIAG=ON -DNES_CPU_BATCH_SCANLINES=16 -DNES6502_OPT_LEVEL=O3 -DNES6502_OPPROFILE=ON
+	cmake --build build/sim
+
+# Use pc_ptr for hot operand fetches and avoid rebasing same-bank taken branches.
+diag-fastpc:
+	cmake -B build/device -DTOOLCHAIN=armgcc -DCMAKE_TOOLCHAIN_FILE=$(TOOLCHAIN) $(FLAGS) -DDIAG=ON -DNES_CPU_BATCH_SCANLINES=16 -DNES6502_OPT_LEVEL=O3 -DNES6502_FAST_PC_OPS=ON
+	cmake --build build/device
+	cmake -B build/sim $(FLAGS) -DDIAG=ON -DNES_CPU_BATCH_SCANLINES=16 -DNES6502_OPT_LEVEL=O3 -DNES6502_FAST_PC_OPS=ON
+	cmake --build build/sim
+
+# Narrow profile-guided probe: specialize only the opcodes that dominate SMB windows.
+diag-hotops:
+	cmake -B build/device -DTOOLCHAIN=armgcc -DCMAKE_TOOLCHAIN_FILE=$(TOOLCHAIN) $(FLAGS) -DDIAG=ON -DNES_CPU_BATCH_SCANLINES=16 -DNES6502_OPT_LEVEL=O3 -DNES6502_HOTOPS=ON
+	cmake --build build/device
+	cmake -B build/sim $(FLAGS) -DDIAG=ON -DNES_CPU_BATCH_SCANLINES=16 -DNES6502_OPT_LEVEL=O3 -DNES6502_HOTOPS=ON
+	cmake --build build/sim
+
 # Profiling matrix targets — build diag with one subsystem disabled at a time.
 diag-nobg:
 	cmake -B build/device -DTOOLCHAIN=armgcc -DCMAKE_TOOLCHAIN_FILE=$(TOOLCHAIN) $(FLAGS) -DDIAG=ON -DPPU_BG=OFF
@@ -100,20 +128,18 @@ _push:
 
 install: all _push
 
+# Keep the device tidy: every diagnostic install overwrites the single on-device
+# nofrendo.pdx instead of creating separately named test copies.
 install-diag: diag _push
-install-diag-nobg: PDX_DEST = nofrendo-nobg.pdx
 install-diag-nobg: diag-nobg _push
-install-diag-nosprites: PDX_DEST = nofrendo-nosprites.pdx
 install-diag-nosprites: diag-nosprites _push
-install-diag-noblit: PDX_DEST = nofrendo-noblit.pdx
 install-diag-noblit: diag-noblit _push
-install-diag-noaudio: PDX_DEST = nofrendo-noaudio.pdx
 install-diag-noaudio: diag-noaudio _push
-install-diag-batchcpu: PDX_DEST = nofrendo-batchcpu$(CPU_BATCH).pdx
 install-diag-batchcpu: diag-batchcpu _push
-install-diag-alignrom: PDX_DEST = nofrendo-batchcpu16-alignrom.pdx
 install-diag-alignrom: diag-alignrom _push
-install-diag-cpuopt: PDX_DEST = nofrendo-batchcpu16-cpu$(CPU_OPT).pdx
 install-diag-cpuopt: diag-cpuopt _push
-install-diag-cpualign: PDX_DEST = nofrendo-batchcpu16-cpuO3-loopalign.pdx
 install-diag-cpualign: diag-cpualign _push
+install-diag-spinhack: diag-spinhack _push
+install-diag-opprofile: diag-opprofile _push
+install-diag-fastpc: diag-fastpc _push
+install-diag-hotops: diag-hotops _push

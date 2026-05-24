@@ -215,10 +215,8 @@ Current measured direction:
 The first matrix pass is ready for device logs:
 
 - `diag-nobg`, `diag-nosprites`, `diag-noblit`, and `diag-noaudio` all build locally.
-- Dedicated install targets now build and push the same variant in one step.
-- Profiling PDX installs use distinct package names beside the normal build:
-  `nofrendo-nobg.pdx`, `nofrendo-nosprites.pdx`, `nofrendo-noblit.pdx`, and
-  `nofrendo-noaudio.pdx`.
+- Dedicated install targets now build the requested variant and overwrite the single
+  on-device `nofrendo.pdx`. Do not create separately named PDX copies for new tests.
 - The normal diagnostic build also exposes Playdate menu checkmarks for `Draw BG` and
   `Draw Sprites`. Reach the scene first, change a checkmark, and capture the following
   `[diag] runtime bg=... sprites=...` marker with the log window.
@@ -599,13 +597,293 @@ Findings:
   to 21-23 ms, with draw frames roughly 8 ms above that.
 - Promote `-O3` as the next baseline for the 6502 CPU core on the measured Rev B device.
 
-### 6502 loop alignment at batch 16 - pending device row
+The restored main-package retest from 2026-05-24 confirms this remains the best baseline
+after rejecting spinhack:
 
-The next layout probe stays on `cpu_batch=16`, keeps the measured `-O3` CPU core, and adds
-`-falign-loops=32` only to `nes6502.c`. It is intentionally small: the device row decides
-whether the hot interpreter loop benefits from loop alignment enough to justify any code
-growth. The diagnostic banner reports `cpu_loop_align=32` for this package. The linked
-`nes6502_execute` grows from the O3 baseline 0x332c bytes to 0x34b4 bytes.
+| Segment in submitted log | fps | avg | cpu_only | ppu_full |
+|---|---:|---:|---:|---:|
+| Fast level windows, frames 60-240 | 47-50 | 20-21 ms | 6-12 ms | 14-19 ms |
+| First slowdown/ramp, frames 300-900 | 41-46 | 21-24 ms | 12-17 ms | 21-25 ms |
+| Busy mid-level windows, frames 960-1980 | 34-41 | 23-29 ms | 17-22 ms | 24-30 ms |
+| Quiet plateau, frames 2040-2340 | 44 | 22 ms | 14 ms | 22-23 ms |
+| Level tail, frames 2400-2940 | 37-45 | 21-26 ms | 13-20 ms | 22-28 ms |
+
+Findings from the retest:
+
+- The user reports it feels smoother, especially around the mushroom interaction.
+- Remaining slowdowns correlate with Goombas/Koopas and moving items on screen.
+- The enemy-heavy rows are still CPU-led, but `cpu_only` now peaks at about 22 ms instead
+  of the 23 ms peaks seen in several earlier variants.
+
+The post-regression restore row from `build=2026-05-24 02:25:27` confirms the known-good
+shape is back after reverting the sprite-cache gate:
+
+| Segment in submitted log | fps | avg | cpu_only | ppu_full |
+|---|---:|---:|---:|---:|
+| Fast level windows, frames 60-300 | 47-50 | 20-21 ms | 6-13 ms | 14-22 ms |
+| First slowdown/ramp, frames 360-960 | 41-45 | 22-24 ms | 13-17 ms | 22-25 ms |
+| Busy mid-level windows, frames 1020-1920 | 33-43 | 23-30 ms | 16-23 ms | 24-31 ms |
+| Quiet plateau, frames 1980-2220 | 44 | 22-24 ms | 14-17 ms | 22-25 ms |
+| Level tail, frames 2280-2760 | 37-45 | 21-26 ms | 13-20 ms | 22-27 ms |
+
+The worst submitted window remains frame 1920 at `fps=33`, `avg=30 ms`,
+`cpu_only=23 ms`, `ppu_full=31 ms`. That is the row the next attribution build should
+explain.
+
+### CPU execution split attribution - confirmed CPU bottleneck
+
+The diagnostic build kept the same emulator behavior and added timing around each
+`nes6502_execute()` chunk inside `nes_renderframe()`. The log line includes:
+
+- `cpu_exec`: average pure CPU interpreter time on skipped visual frames.
+- `cpu_misc`: `cpu_only - cpu_exec`, covering non-draw PPU state, blit no-op path,
+  hblank/vblank callbacks, FIQ checks, and scanline loop overhead.
+- `ppu_exec`: average pure CPU interpreter time on drawn frames.
+
+This was instrumentation only. It adds a small timing-call cost, so the split proportions
+matter more than the raw speed row.
+
+Device row:
+
+- Banner timestamp: `build=2026-05-24 02:33:09`.
+- Settings: `cpu_batch=16`, `cpu_opt=O3`, `cpu_loop_align=off`,
+  `cpu_spin=off`, `prg_align=off`.
+
+| Segment in submitted log | fps | avg | cpu_only | cpu_exec | cpu_misc | ppu_full | ppu_exec |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Fast level windows, frames 60-240 | 46-49 | 20-21 ms | 6-12 ms | 4-11 ms | 1-2 ms | 16-19 ms | 5-11 ms |
+| First slowdown/ramp, frames 300-840 | 38-45 | 21-26 ms | 11-19 ms | 10-17 ms | 1-2 ms | 22-27 ms | 8-16 ms |
+| Busy mid-level windows, frames 900-1260 | 34-40 | 24-28 ms | 18-22 ms | 16-20 ms | 1-2 ms | 26-29 ms | 16-19 ms |
+| Block/enemy-heavy windows, frames 1500-1800 | 31-40 | 24-31 ms | 17-24 ms | 15-22 ms | 1-2 ms | 26-32 ms | 15-21 ms |
+| Quiet recovery, frames 1860-2160 | 43 | 22-23 ms | 14-15 ms | 12-13 ms | 1-2 ms | 24 ms | 12-13 ms |
+| Tail windows, frames 2220-2640 | 37-44 | 22-26 ms | 14-19 ms | 12-17 ms | 1-2 ms | 23-28 ms | 12-17 ms |
+
+Findings:
+
+- The remaining Mario slowdowns are overwhelmingly pure `nes6502_execute()` time.
+- `cpu_misc` is almost always only 1-2 ms, so hblank/vblank callbacks, skipped-frame PPU
+  state, FIQ checks, and diagnostic frame wrapper overhead are not where the bad windows live.
+- The worst submitted window is frame 1740: `fps=31`, `avg=31 ms`, `cpu_only=24 ms`,
+  `cpu_exec=22 ms`, `cpu_misc=2 ms`, `ppu_full=32 ms`, `ppu_exec=21 ms`.
+- Draw frames still carry about 8-11 ms of non-CPU render cost, so PPU optimization remains
+  useful later. But the current slowdowns with enemies/items are CPU interpreter/opcode-mix
+  problems first.
+
+### 6502 opcode mix profile - pending device row
+
+The next diagnostic build keeps the best behavior row (`cpu_batch=16`, `cpu_opt=O3`,
+spin/align off) and adds a per-opcode counter inside the 6502 switch dispatch. Every 60-frame
+window now emits a second diagnostic line:
+
+```text
+[diag] op_total=... top=AD:... D0:... ...
+```
+
+This build is expected to run slower than the plain baseline because it increments a counter
+for every emulated instruction. Use it only to identify which opcodes dominate the same
+slow Mario 1-1 windows. The next real optimization should specialize the hottest measured
+opcodes or their addressing-mode helpers instead of guessing at broad PPU or scheduler work.
+
+Device row:
+
+- Banner timestamp: `build=2026-05-24 02:41:57`.
+- Settings: `cpu_batch=16`, `cpu_opt=O3`, `cpu_spin=off`, `cpu_prof=opcode`.
+
+| Segment in submitted log | fps | avg | cpu_only | cpu_exec | ppu_full | Hot opcode shape |
+|---|---:|---:|---:|---:|---:|---|
+| Fast/idle windows, frames 120-180 | 42-47 | 21-23 ms | 10-14 ms | 8-12 ms | 21-24 ms | `4C` dominates at 474k-544k hits |
+| First slowdown, frames 300-540 | 30-34 | 29-32 ms | 22-25 ms | 21-24 ms | 31-34 ms | `4C` drops; `C8/D0/85/C9/99/4A` rise |
+| Heavy enemy/block windows, frames 840-1200 | 26-28 | 35-38 ms | 27-30 ms | 25-28 ms | 36-39 ms | branches, stores, compares, zero-page loads dominate more |
+| Worst profile windows, frames 1680-1740 | 24-25 | 39-40 ms | 31-32 ms | 30 ms | 41 ms | `4C` only ~177k-179k; `D0/85/C8/C9/99/A5/4A` all hot |
+
+Findings:
+
+- The profile build is intentionally much slower and should not be judged as a playable
+  row. It adds a counter write to roughly 570k interpreted instructions per 60-frame window.
+- Fast windows are mostly repeated `JMP absolute` (`4C`), likely idle/wait/control-loop code.
+  The windows that feel bad have less `4C` and more real game logic: taken/not-taken branches,
+  zero-page stores/loads, compares, absolute indexed stores, and shifts.
+- The next measured candidate is `NES6502_FAST_PC_OPS`: fetch immediate/absolute operands
+  through `pc_ptr`, avoid a full `PC_REBASE()` for same-4KB-bank taken relative branches,
+  and special-case `JMP absolute` operand fetch. This directly targets the hot opcode list
+  without enabling the expensive opcode counter.
+
+### 6502 fast PC operand and branch path - mixed/flat
+
+This diagnostic row keeps the known-good timing settings (`cpu_batch=16`, `cpu_opt=O3`,
+spin/profile/align off) and enables `cpu_fastpc=on`.
+
+Targeted costs:
+
+- `D0/F0/10` relative branches no longer rebase the host PC pointer when the target stays in
+  the same 4 KB emulated memory bank.
+- `85/A5/C9` and other immediate/zero-page operands fetch operand bytes through `pc_ptr`
+  instead of `bank_readbyte(PC++)`.
+- `AD/BD/99/4C` and other absolute operands fetch operand words through `pc_ptr` when the
+  two bytes are contiguous in the current 4 KB bank.
+
+This is a speed row, not an attribution row. Compare it against the plain O3 baseline, not
+against the opcode-profile build.
+
+Device row:
+
+- Banner timestamp: `build=2026-05-24 02:50:44`.
+- Settings: `cpu_batch=16`, `cpu_opt=O3`, `cpu_spin=off`, `cpu_prof=off`,
+  `cpu_fastpc=on`, `prg_align=off`.
+
+| Segment in submitted log | fps | avg | cpu_only | cpu_exec | ppu_full | ppu_exec |
+|---|---:|---:|---:|---:|---:|---:|
+| Fast level windows, frames 60-240 | 46-50 | 20-21 ms | 6-13 ms | 4-11 ms | 15-20 ms | 4-11 ms |
+| First slowdown/ramp, frames 300-840 | 39-46 | 21-25 ms | 11-19 ms | 9-17 ms | 19-26 ms | 9-16 ms |
+| Busy mid-level windows, frames 900-1260 | 34-40 | 24-28 ms | 18-22 ms | 17-20 ms | 26-29 ms | 16-19 ms |
+| Late busy windows, frames 1500-1740 | 31-37 | 26-31 ms | 20-24 ms | 18-23 ms | 28-33 ms | 17-22 ms |
+| Recovery/tail, frames 1800-2700 | 36-44 | 22-27 ms | 13-20 ms | 12-19 ms | 23-28 ms | 12-17 ms |
+
+Findings:
+
+- Broad direct PC operand fetch helps some light windows, but it does not materially reduce
+  the stubborn enemy/item slowdowns.
+- The worst fastPC window still reaches `fps=31`, `avg=31 ms`, `cpu_only=24 ms`,
+  `cpu_exec=23 ms`, `ppu_full=33 ms`, `ppu_exec=22 ms`.
+- Do not promote the broad `NES6502_FAST_PC_OPS` switch yet. The likely issue is that the
+  extra helper code and branch shape helps cheap/idle code but gives back the gain through
+  code size and I-cache pressure during real game logic.
+- The next candidate should keep the approach narrower: specialize only the opcodes that the
+  profile proved are hot in Mario's slow windows.
+
+### 6502 hot opcode specialization - pending device results
+
+This candidate keeps the known-good baseline (`cpu_batch=16`, `cpu_opt=O3`, spin/profile/
+align/fastPC off) and enables `cpu_hotops=on`. It hand-specializes only the opcodes that
+dominated the opcode profile:
+
+- Branches: `10`/`D0`/`F0` avoid a `PC_REBASE()` when a taken branch stays in the same 4 KB
+  emulated bank.
+- Loads/stores: `85`/`8D`/`99`/`A5`/`AD`/`BD` fetch operands directly and use fast RAM/ROM
+  accesses where the mapping is known.
+- Compare/jump: `C9` and `4C` fetch operands directly.
+
+This is a profile-guided speed row. It deliberately leaves the broad fastPC path off so the
+test can answer whether targeted hot op specialization beats the larger all-opcode helper
+surface.
+
+Build/install status:
+
+- Built and installed over the single `Games/nofrendo.pdx` on 2026-05-24.
+- Expected banner timestamp: `build=2026-05-24 12:41:50`.
+- Expected settings: `cpu_batch=16`, `cpu_opt=O3`, `cpu_spin=off`, `cpu_prof=off`,
+  `cpu_fastpc=off`, `cpu_hotops=on`, `prg_align=off`.
+
+### Rendered-sprite pattern cache gating - regression
+
+This small PPU-side probe targeted the enemy-heavy dips without changing CPU timing.
+`ppu_build_sprite_cache()` still scans all 64 OAM entries and still increments
+`oam_sl_count` for every visible sprite on every covered scanline, so max-sprite overflow
+state is preserved. The change only skips the expensive CHR bitplane predecode for sprites
+that never enter one of the first eight render slots on any visible scanline.
+
+Why it looked worth testing:
+
+- The remaining slowdowns correlate with Goombas/Koopas/items, and this work runs at
+  scanline 0 even on skipped visual frames, so it can affect the `cpu_only` number too.
+- It should be low risk for drawn frames because `ppu_renderoam()` only reads cached pattern
+  rows through `oam_sl_idx`, and this experiment decodes exactly those sprites.
+- Skipped visual frames still use `ppu_fakeoam()` for sprite-zero handling, which reads raw
+  CHR data and does not depend on the predecoded render cache.
+
+Device row:
+
+- Built with `make diag-cpuopt CPU_OPT=O3` and copied over the single
+  `Games/nofrendo.pdx`.
+- Banner timestamp: `build=2026-05-24 02:17:03`.
+- Settings: `cpu_batch=16`, `cpu_opt=O3`, `cpu_loop_align=off`,
+  `cpu_spin=off`, `prg_align=off`.
+
+| Segment in submitted log | fps | avg | cpu_only | ppu_full |
+|---|---:|---:|---:|---:|
+| Fast level windows, frames 60-360 | 46-49 | 20-21 ms | 6-12 ms | 15-22 ms |
+| First slowdown/ramp, frames 420-900 | 41-46 | 21-24 ms | 10-17 ms | 21-25 ms |
+| Busy mid-level windows, frames 960-1860 | 33-41 | 23-29 ms | 16-23 ms | 25-31 ms |
+| Quiet plateau, frames 1920-2220 | 43-44 | 22 ms | 13-14 ms | 23 ms |
+| Level tail, frames 2280-2760 | 37-44 | 22-26 ms | 13-20 ms | 22-28 ms |
+
+Findings:
+
+- The user reports that it feels worse, especially when jumping on blocks to spawn
+  mushrooms.
+- The numbers are mixed rather than a clean win. Some early windows improve, but the
+  block/enemy-heavy stretch still reaches `cpu_only=23 ms` and `ppu_full=31 ms`, worse
+  than the restored O3 baseline in a comparable slow window.
+- The branch/skip bookkeeping, changed cache locality, or scene timing side effects cost
+  more than the skipped CHR predecode saves.
+- The code change was reverted. Do not retry this exact gate; if sprites are attacked
+  again, work inside `draw_oamtile()` or add a measured fast path instead.
+
+### 6502 loop alignment at batch 16 - flat/slightly worse
+
+This layout probe stayed on `cpu_batch=16`, kept the measured `-O3` CPU core, and added
+`-falign-loops=32` only to `nes6502.c`. The diagnostic banner reports
+`cpu_loop_align=32` for this package. The linked `nes6502_execute` grows from the O3
+baseline 0x332c bytes to 0x34b4 bytes.
+
+The full Mario 1-1 row from `nofrendo-batchcpu16-cpuO3-loopalign.pdx` does not beat the
+plain `-O3` row:
+
+| Segment in submitted log | fps | avg | cpu_only | ppu_full |
+|---|---:|---:|---:|---:|
+| Fast level windows, frames 60-360 | 45-50 | 20-21 ms | 6-13 ms | 16-23 ms |
+| First slowdown/ramp, frames 420-1020 | 41-44 | 22-24 ms | 12-17 ms | 22-26 ms |
+| Busy mid-level windows, frames 1080-2040 | 34-39 | 25-28 ms | 18-22 ms | 26-30 ms |
+| Quiet recovery/tail, frames 2100-2820 | 38-44 | 22-25 ms | 13-18 ms | 23-27 ms |
+
+Findings:
+
+- Loop alignment is flat in the fast windows and slightly worse in several busy windows.
+- The larger function body does not buy back enough branch alignment to justify the extra
+  I-cache pressure.
+- Keep `NES6502_ALIGN_LOOPS=OFF`; the best current baseline is `cpu_batch=16`,
+  `cpu_opt=O3`, `prg_align=off`.
+
+### PPUSTATUS spin-loop fast-forward at batch 16 - miss
+
+This CPU-side probe kept the current best baseline and added an intentionally narrow
+speed hack for the classic vblank wait loop:
+
+```asm
+BIT $2002  ; or LDA $2002
+BPL ...
+```
+
+When the branch is exactly the immediate backwards branch to the status read and the
+vblank bit is still clear, the emulator now consumes the rest of that CPU timeslice in
+one step instead of interpreting the same wait-loop body until `remaining_cycles` expires.
+This should preserve the coarse timeslice accounting used by the batch-16 renderer, but it
+can alter sub-scanline PC position at slice boundaries, so it is a diagnostic row first.
+
+The diagnostic banner reports `cpu_spin=ppustatus`. The linked `nes6502_execute` grows to
+0x34f8 bytes, so this row needed to visibly reduce `cpu_only` time to justify the extra
+I-cache pressure.
+
+The full Mario 1-1 row from the `cpu_spin=ppustatus` build is worse than the plain O3
+baseline in several comparable windows:
+
+| Segment in submitted log | fps | avg | cpu_only | ppu_full |
+|---|---:|---:|---:|---:|
+| Fast level windows, frames 60-240 | 44-49 | 20-22 ms | 6-14 ms | 17-23 ms |
+| First slowdown/ramp, frames 300-900 | 38-43 | 22-25 ms | 13-18 ms | 23-27 ms |
+| Busy mid-level windows, frames 960-1800 | 32-41 | 23-30 ms | 16-23 ms | 25-32 ms |
+| Recovery/tail, frames 1860-2700 | 34-43 | 22-28 ms | 14-22 ms | 24-30 ms |
+
+Findings:
+
+- The user completed all of Mario 1-1. Slowdowns still appear around block/mushroom
+  interactions and scenes with several Goombas/Koopas moving.
+- The row does not reduce the stubborn `cpu_only` peaks; it still reaches 22-23 ms in the
+  same busy areas.
+- Several early and tail windows trail the plain O3 row, consistent with the added code
+  size increasing I-cache pressure.
+- Keep `NES6502_SPINHACK=OFF`; restore the main device build to plain `cpu_batch=16`,
+  `cpu_opt=O3`, `cpu_loop_align=off`, `prg_align=off`.
 
 Build status on 2026-05-22:
 
@@ -628,6 +906,37 @@ Build status on 2026-05-22:
   as `nofrendo-batchcpu16-cpuO3.pdx`.
 - `make diag-cpualign` succeeds for device and simulator packages and was copied as
   `nofrendo-batchcpu16-cpuO3-loopalign.pdx`.
+
+Build status on 2026-05-23:
+
+- `make diag-spinhack` succeeds for device and simulator packages. It keeps
+  `cpu_batch=16`, `cpu_opt=O3`, `cpu_loop_align=off`, `prg_align=off`, and reports
+  `cpu_spin=ppustatus`.
+
+Build status on 2026-05-24:
+
+- After the spinhack row missed, the connected Playdate was restored to the plain O3
+  baseline as the single `Games/nofrendo.pdx`: `cpu_batch=16`, `cpu_opt=O3`,
+  `cpu_loop_align=off`, `cpu_spin=off`, `prg_align=off`.
+- The rendered-sprite pattern-cache gating probe was built and installed over the single
+  `Games/nofrendo.pdx`; the user reports it feels worse and the busy rows do not improve.
+  The code change was reverted.
+- The plain O3 baseline was rebuilt after the revert and installed over the single
+  `Games/nofrendo.pdx`. Expected banner timestamp: `build=2026-05-24 02:25:27`.
+
+- The CPU execution split attribution build was built and installed over the single
+  `Games/nofrendo.pdx`. Expected banner timestamp: `build=2026-05-24 02:33:09`.
+  The submitted row confirms `cpu_exec` dominates the remaining slowdowns.
+- The opcode mix profile build was installed and tested. It was intentionally much slower
+  because it increments a counter for every interpreted instruction, but it identified the
+  slow-window opcode mix: `D0`, `85`, `C8`, `C9`, `99`, `A5`, `4A`, plus less-dominant
+  `4C` than in idle windows.
+- The fast PC operand/branch candidate was installed and tested over the single
+  `Games/nofrendo.pdx`. Banner timestamp: `build=2026-05-24 02:50:44`, with
+  `cpu_fastpc=on` and `cpu_prof=off`. It was mixed/flat and is not promoted.
+- The hot-opcode specialization candidate was built and installed over the single
+  `Games/nofrendo.pdx`. Expected banner timestamp: `build=2026-05-24 12:41:50`, with
+  `cpu_fastpc=off` and `cpu_hotops=on`.
 
 ### Background tile CHR cache — only if DTCM becomes available
 
@@ -665,9 +974,13 @@ make diag-nobg       # diagnostic build, bg rendering disabled
 make diag-nosprites  # diagnostic build, sprite rendering disabled
 make diag-noblit     # diagnostic build, Playdate scanline blit disabled
 make diag-noaudio    # diagnostic build, audio disabled
-make install-diag-nobg       # build + push nofrendo-nobg.pdx
-make install-diag-nosprites  # build + push nofrendo-nosprites.pdx
-make install-diag-noblit     # build + push nofrendo-noblit.pdx
-make install-diag-noaudio    # build + push nofrendo-noaudio.pdx
+make diag-opprofile  # diagnostic build, opcode counter enabled
+make diag-fastpc     # diagnostic build, fast PC operand/branch path enabled
+make install-diag-nobg       # build + push as nofrendo.pdx
+make install-diag-nosprites  # build + push as nofrendo.pdx
+make install-diag-noblit     # build + push as nofrendo.pdx
+make install-diag-noaudio    # build + push as nofrendo.pdx
+make install-diag-opprofile  # build + push as nofrendo.pdx
+make install-diag-fastpc     # build + push as nofrendo.pdx
 PORT=/dev/cu.XXX make install   # override auto-detected serial port
 ```

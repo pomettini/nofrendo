@@ -14,6 +14,12 @@ being established.
 | Audio | Mono speaker + headphone jack |
 | Controls | D-pad, A, B, Menu, Lock, Crank |
 
+## Device install policy
+
+Always install the current test build as `nofrendo.pdx` on the Playdate. Do not push
+separately named diagnostic copies such as `nofrendo-batchcpu16-...pdx`; keep only one
+on-device copy and let new experiments overwrite it.
+
 ## What's here
 
 `src/nofrendo/` — upstream Nofrendo emulator core, unchanged. Keep it that way; all platform work goes in `src/`.

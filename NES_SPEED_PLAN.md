@@ -199,7 +199,9 @@ Do this:
   and edge cases into cold functions or a cold compatibility build.
 - Try a legal-opcode-only fast profile for tested ROMs.
 - Try `-Os`, `-O2`, and `-O3` on the CPU core after each structural change.
-- Try `-falign-loops=32` only in a measured branch; keep it if it helps.
+- Keep the measured `-falign-loops=32` row off for now. On the current
+  `cpu_batch=16`/`-O3` baseline it grew `nes6502_execute` from about 13.1 KB to
+  about 13.5 KB and was flat to slightly worse in Mario 1-1 busy windows.
 
 Performance-lottery controls:
 
@@ -316,6 +318,13 @@ Measure:
 
 This should be done after or alongside the PC pointer fast path, because both
 touch the CPU memory access model.
+
+Related measured experiment: add a diagnostic-only fast-forward for exact
+PPUSTATUS vblank wait loops, specifically `BIT $2002` or `LDA $2002` followed
+by `BPL` back to the read. This is less general than the address-class rewrite,
+but cheaper to test. Device results say to keep it off: it did not reduce the
+busy-scene `cpu_only` peaks, and the larger `nes6502_execute` body likely added
+I-cache pressure.
 
 ## 6. Compile a Fast Compatibility Profile
 
@@ -462,6 +471,12 @@ Risk: medium
 The OAM miss-path optimization already did not move the needle. The expensive
 part is drawing visible sprite rows in `draw_oamtile()`.
 
+Measured miss before the larger rewrite: keeping the scanline OAM list and
+max-sprite counts exact while only predecoding CHR pattern rows for sprites that
+enter the first eight render slots did not help. The user reported worse feel
+around block/mushroom interactions, and the busy rows still reached
+`cpu_only=23 ms`. Do not retry that exact cache gate.
+
 Do this:
 
 - Cache decoded sprite pattern rows for normal and h-flipped variants.
@@ -546,13 +561,14 @@ Measure this only after bigger CPU changes; otherwise it will be lost in noise.
 4. Shrink and isolate the hot interpreter path.
 5. Prototype PC host-pointer opcode fetch.
 6. Specialize CPU memory access by address class.
-7. Add a fast compatibility build profile.
-8. Try DTCM data placement with canaries.
-9. Try ITCM relocation only after a tiny proof works.
-10. Add PPU background row caching.
-11. Add sprite row caching and sprite fast paths.
-12. Audit tight-loop arithmetic and prefetch candidates.
-13. Consider a monochrome-native PPU path only after CPU work lands.
+7. Test exact PPUSTATUS wait-loop fast-forward as a diagnostic row.
+8. Add a fast compatibility build profile.
+9. Try DTCM data placement with canaries.
+10. Try ITCM relocation only after a tiny proof works.
+11. Add PPU background row caching.
+12. Add sprite row caching and sprite fast paths.
+13. Audit tight-loop arithmetic and prefetch candidates.
+14. Consider a monochrome-native PPU path only after CPU work lands.
 
 ## Expected Path to 60 Hz
 

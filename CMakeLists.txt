@@ -75,6 +75,10 @@ set(NES_CPU_BATCH_SCANLINES "1" CACHE STRING
 set(NES6502_OPT_LEVEL "O3" CACHE STRING
     "Optimization level for nes6502.c performance experiments")
 option(NES6502_ALIGN_LOOPS "Align 6502 hot loops for performance experiments" OFF)
+option(NES6502_SPINHACK "Fast-forward selected PPUSTATUS polling loops" OFF)
+option(NES6502_OPPROFILE "Count executed 6502 opcodes in diagnostic windows" OFF)
+option(NES6502_FAST_PC_OPS "Use pc_ptr for operand fetches and same-bank branches" OFF)
+option(NES6502_HOTOPS "Hand-specialize the hottest measured 6502 opcodes" OFF)
 if (AUDIO)
     file(GLOB AUDIO_SOURCES src/nofrendo/sndhrdw/*.c)
     list(APPEND NOFRENDO_CORE ${AUDIO_SOURCES})
@@ -105,6 +109,10 @@ set(GAME_DEFINES
     NES_CPU_BATCH_SCANLINES=${NES_CPU_BATCH_SCANLINES}
     NES6502_OPT_LEVEL_LABEL="${NES6502_OPT_LEVEL}"
     $<$<BOOL:${NES6502_ALIGN_LOOPS}>:NES6502_ALIGN_LOOPS=1>
+    $<$<BOOL:${NES6502_SPINHACK}>:NES6502_SPINHACK=1>
+    $<$<BOOL:${NES6502_OPPROFILE}>:NES6502_OPPROFILE=1>
+    $<$<BOOL:${NES6502_FAST_PC_OPS}>:NES6502_FAST_PC_OPS=1>
+    $<$<BOOL:${NES6502_HOTOPS}>:NES6502_HOTOPS=1>
 )
 
 # add_executable / add_library must come before including playdate_game.cmake

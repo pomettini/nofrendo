@@ -114,6 +114,11 @@ extern uint32 nes6502_getcycles(bool reset_flag);
 extern void nes6502_burn(int cycles);
 extern void nes6502_release(void);
 
+#ifdef NES6502_OPPROFILE
+extern void nes6502_opcode_profile_reset(void);
+extern void nes6502_opcode_profile_snapshot(uint32 counts[256], uint32 *total);
+#endif
+
 /* Context get/set */
 extern void nes6502_setcontext(nes6502_context *cpu);
 extern void nes6502_getcontext(nes6502_context *cpu);

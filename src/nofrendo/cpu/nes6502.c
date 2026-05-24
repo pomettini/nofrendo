@@ -60,12 +60,133 @@
 #define PC_SKIP_1() { pc_ptr++; PC++; }
 #define PC_SKIP_2() { pc_ptr += 2; PC += 2; }
 #define PC_DEC_1()  { pc_ptr--; PC--; }
+#define FETCH_PC_BYTE_DIRECT(value) \
+{ \
+   if (__builtin_expect(pc_ptr >= pc_bank_end, 0)) PC_REBASE(); \
+   (value) = *pc_ptr++; \
+   PC++; \
+}
+#define FETCH_PC_WORD_DIRECT(value) \
+{ \
+   if (__builtin_expect((pc_bank_end - pc_ptr) < 2, 0)) \
+   { \
+      (value) = bank_readword(PC); \
+      PC += 2; \
+      PC_REBASE(); \
+   } \
+   else \
+   { \
+      (value) = (uint32) pc_ptr[0] | ((uint32) pc_ptr[1] << 8); \
+      pc_ptr += 2; \
+      PC += 2; \
+   } \
+}
+#define PC_BRANCH_TO_DIRECT(address) \
+{ \
+   uint32 _branch_target = (address) & 0xFFFF; \
+   if (__builtin_expect(((PC ^ _branch_target) & ~NES6502_BANKMASK) != 0, 0)) \
+   { \
+      PC = _branch_target; \
+      PC_REBASE(); \
+   } \
+   else \
+   { \
+      pc_ptr += (int8) btemp; \
+      PC = _branch_target; \
+   } \
+}
+#ifdef NES6502_FAST_PC_OPS
+#define FETCH_PC_BYTE(value) \
+{ \
+   FETCH_PC_BYTE_DIRECT(value); \
+}
+#define FETCH_PC_WORD(value) \
+{ \
+   FETCH_PC_WORD_DIRECT(value); \
+}
+#define PC_SKIP_1_CHECKED() \
+{ \
+   if (__builtin_expect(pc_ptr >= pc_bank_end, 0)) PC_REBASE(); \
+   pc_ptr++; \
+   PC++; \
+}
+#define PC_BRANCH_TO(address) \
+{ \
+   PC_BRANCH_TO_DIRECT(address); \
+}
+#else
+#define FETCH_PC_BYTE(value) \
+{ \
+   (value) = bank_readbyte(PC++); \
+   pc_ptr++; \
+}
+#define FETCH_PC_WORD(value) \
+{ \
+   (value) = bank_readword(PC); \
+   pc_ptr += 2; \
+   PC += 2; \
+}
+#define PC_SKIP_1_CHECKED() \
+{ \
+   pc_ptr++; \
+   PC++; \
+   if (__builtin_expect(pc_ptr >= pc_bank_end, 0)) PC_REBASE(); \
+}
+#define PC_BRANCH_TO(address) \
+{ \
+   PC = (address) & 0xFFFF; \
+   PC_REBASE(); \
+}
+#endif
 #else
 #define NES6502_PC_PTR_LOCALS
 #define PC_REBASE()
 #define PC_SKIP_1() { PC++; }
 #define PC_SKIP_2() { PC += 2; }
 #define PC_DEC_1()  { PC--; }
+#define FETCH_PC_BYTE(value) { value = bank_readbyte(PC++); }
+#define FETCH_PC_WORD(value) { value = bank_readword(PC); PC += 2; }
+#define FETCH_PC_BYTE_DIRECT(value) FETCH_PC_BYTE(value)
+#define FETCH_PC_WORD_DIRECT(value) FETCH_PC_WORD(value)
+#define PC_SKIP_1_CHECKED() PC_SKIP_1()
+#define PC_BRANCH_TO_DIRECT(address) { PC = (address) & 0xFFFF; }
+#endif
+
+#define READ_FAST_BYTE(address, value) \
+{ \
+   if ((address) >= 0x8000) \
+      (value) = bank_readbyte(address); \
+   else if ((address) < 0x800) \
+      (value) = ram[address]; \
+   else \
+      (value) = mem_readbyte(address); \
+}
+
+#define WRITE_FAST_BYTE(address, value) \
+{ \
+   if ((address) < 0x800) \
+      ram[address] = (uint8) (value); \
+   else \
+      mem_writebyte(address, value); \
+}
+
+#ifdef NES6502_HOTOPS
+#define HOT_RELATIVE_BRANCH(condition) \
+{ \
+   if (condition) \
+   { \
+      FETCH_PC_BYTE_DIRECT(btemp); \
+      if (((int8) btemp + (PC & 0x00FF)) & 0x100) \
+         ADD_CYCLES(1); \
+      ADD_CYCLES(3); \
+      PC_BRANCH_TO_DIRECT(PC + (int8) btemp); \
+   } \
+   else \
+   { \
+      PC_SKIP_1_CHECKED(); \
+      ADD_CYCLES(2); \
+   } \
+}
 #endif
 
 /*
@@ -87,13 +208,12 @@
 #ifdef NES6502_PC_PTR
 #define IMMEDIATE_BYTE(value) \
 { \
-   (value) = bank_readbyte(PC++); \
-   pc_ptr++; \
+   FETCH_PC_BYTE(value); \
 }
 #else
 #define IMMEDIATE_BYTE(value) \
 { \
-   value = bank_readbyte(PC++); \
+   FETCH_PC_BYTE(value); \
 }
 #endif
 
@@ -101,15 +221,12 @@
 #ifdef NES6502_PC_PTR
 #define ABSOLUTE_ADDR(address) \
 { \
-   address = bank_readword(PC); \
-   pc_ptr += 2; \
-   PC += 2; \
+   FETCH_PC_WORD(address); \
 }
 #else
 #define ABSOLUTE_ADDR(address) \
 { \
-   address = bank_readword(PC); \
-   PC += 2; \
+   FETCH_PC_WORD(address); \
 }
 #endif
 
@@ -327,14 +444,11 @@
       if (((int8) btemp + (PC & 0x00FF)) & 0x100) \
          ADD_CYCLES(1); \
       ADD_CYCLES(3); \
-      PC += (int8) btemp; \
-      PC_REBASE(); \
+      PC_BRANCH_TO(PC + (int8) btemp); \
    } \
    else \
    { \
-      pc_ptr++; \
-      PC++; \
-      if (__builtin_expect(pc_ptr >= pc_bank_end, 0)) PC_REBASE(); \
+      PC_SKIP_1_CHECKED(); \
       ADD_CYCLES(2); \
    } \
 }
@@ -356,6 +470,65 @@
    } \
 }
 #endif
+
+#ifdef NES6502_SPINHACK
+#define PPUSTATUS_SPIN_BPL(target, offset) \
+{ \
+   if (__builtin_expect(remaining_cycles > 0 && (uint8) (offset) == 0xFB, 0)) \
+   { \
+      uint32 _spin_pc = (target) & 0xFFFF; \
+      uint8 _spin_op = bank_readbyte(_spin_pc); \
+      if ((_spin_op == 0x2C || _spin_op == 0xAD) \
+          && bank_readbyte((_spin_pc + 1) & 0xFFFF) == 0x02 \
+          && bank_readbyte((_spin_pc + 2) & 0xFFFF) == 0x20) \
+      { \
+         int _spin_burn = remaining_cycles; \
+         ADD_CYCLES(_spin_burn); \
+      } \
+   } \
+}
+
+#ifdef NES6502_PC_PTR
+#define RELATIVE_BRANCH_BPL_SPIN(condition) \
+{ \
+   if (condition) \
+   { \
+      IMMEDIATE_BYTE(btemp); \
+      if (((int8) btemp + (PC & 0x00FF)) & 0x100) \
+         ADD_CYCLES(1); \
+      ADD_CYCLES(3); \
+      PC += (int8) btemp; \
+      PC_REBASE(); \
+      PPUSTATUS_SPIN_BPL(PC, btemp); \
+   } \
+   else \
+   { \
+      pc_ptr++; \
+      PC++; \
+      if (__builtin_expect(pc_ptr >= pc_bank_end, 0)) PC_REBASE(); \
+      ADD_CYCLES(2); \
+   } \
+}
+#else
+#define RELATIVE_BRANCH_BPL_SPIN(condition) \
+{ \
+   if (condition) \
+   { \
+      IMMEDIATE_BYTE(btemp); \
+      if (((int8) btemp + (PC & 0x00FF)) & 0x100) \
+         ADD_CYCLES(1); \
+      ADD_CYCLES(3); \
+      PC += (int8) btemp; \
+      PPUSTATUS_SPIN_BPL(PC, btemp); \
+   } \
+   else \
+   { \
+      PC++; \
+      ADD_CYCLES(2); \
+   } \
+}
+#endif
+#endif /* NES6502_SPINHACK */
 
 #define JUMP(address) \
 { \
@@ -575,10 +748,17 @@
    RELATIVE_BRANCH(0 != z_flag); \
 }
 
+#ifdef NES6502_SPINHACK
+#define BPL() \
+{ \
+   RELATIVE_BRANCH_BPL_SPIN(0 == (n_flag & N_FLAG)); \
+}
+#else
 #define BPL() \
 { \
    RELATIVE_BRANCH(0 == (n_flag & N_FLAG)); \
 }
+#endif
 
 /* Software interrupt type thang */
 #define BRK() \
@@ -770,11 +950,21 @@
    ADD_CYCLES(5); \
 }
 
+#ifdef NES6502_FAST_PC_OPS
+#define JMP_ABSOLUTE() \
+{ \
+   FETCH_PC_WORD_DIRECT(temp); \
+   PC = temp; \
+   PC_REBASE(); \
+   ADD_CYCLES(3); \
+}
+#else
 #define JMP_ABSOLUTE() \
 { \
    JUMP(PC); \
    ADD_CYCLES(3); \
 }
+#endif
 
 #define JSR() \
 { \
@@ -1212,6 +1402,33 @@ static int remaining_cycles = 0; /* so we can release timeslice */
 static uint8 *ram = NULL, *stack = NULL;
 static uint8 *null_page;
 
+#ifdef NES6502_OPPROFILE
+static uint32 opcode_profile[256];
+static uint32 opcode_profile_total = 0;
+
+#define PROFILE_OPCODE(opcode) \
+{ \
+   opcode_profile[(uint8) (opcode)]++; \
+   opcode_profile_total++; \
+}
+
+void nes6502_opcode_profile_reset(void)
+{
+   memset(opcode_profile, 0, sizeof(opcode_profile));
+   opcode_profile_total = 0;
+}
+
+void nes6502_opcode_profile_snapshot(uint32 counts[256], uint32 *total)
+{
+   memcpy(counts, opcode_profile, sizeof(opcode_profile));
+   if (total)
+      *total = opcode_profile_total;
+   nes6502_opcode_profile_reset();
+}
+#else
+#define PROFILE_OPCODE(opcode)  ((void) 0)
+#endif
+
 
 /*
 ** Zero-page helper macros
@@ -1580,6 +1797,7 @@ int nes6502_execute(int timeslice_cycles)
          if (__builtin_expect(pc_ptr >= pc_bank_end, 0)) PC_REBASE();
          _op = *pc_ptr++;
          PC++;
+         PROFILE_OPCODE(_op);
          switch (_op)
          {
 #else
@@ -1668,7 +1886,11 @@ int nes6502_execute(int timeslice_cycles)
          OPCODE_END
 
       OPCODE_BEGIN(10)  /* BPL $nnnn */
+#ifdef NES6502_HOTOPS
+         HOT_RELATIVE_BRANCH(0 == (n_flag & N_FLAG));
+#else
          BPL();
+#endif
          OPCODE_END
 
       OPCODE_BEGIN(11)  /* ORA ($nn),Y */
@@ -1891,7 +2113,14 @@ int nes6502_execute(int timeslice_cycles)
          OPCODE_END
 
       OPCODE_BEGIN(4C)  /* JMP $nnnn */
+#ifdef NES6502_HOTOPS
+         FETCH_PC_WORD_DIRECT(temp);
+         PC = temp;
+         PC_REBASE();
+         ADD_CYCLES(3);
+#else
          JMP_ABSOLUTE();
+#endif
          OPCODE_END
 
       OPCODE_BEGIN(4D)  /* EOR $nnnn */
@@ -2079,7 +2308,13 @@ int nes6502_execute(int timeslice_cycles)
          OPCODE_END
 
       OPCODE_BEGIN(85)  /* STA $nn */
+#ifdef NES6502_HOTOPS
+         FETCH_PC_BYTE_DIRECT(baddr);
+         ZP_WRITEBYTE(baddr, A);
+         ADD_CYCLES(3);
+#else
          STA(3, ZERO_PAGE_ADDR, ZP_WRITEBYTE, baddr);
+#endif
          OPCODE_END
 
       OPCODE_BEGIN(86)  /* STX $nn */
@@ -2107,7 +2342,13 @@ int nes6502_execute(int timeslice_cycles)
          OPCODE_END
 
       OPCODE_BEGIN(8D)  /* STA $nnnn */
+#ifdef NES6502_HOTOPS
+         FETCH_PC_WORD_DIRECT(addr);
+         WRITE_FAST_BYTE(addr, A);
+         ADD_CYCLES(4);
+#else
          STA(4, ABSOLUTE_ADDR, mem_writebyte, addr);
+#endif
          OPCODE_END
 
       OPCODE_BEGIN(8E)  /* STX $nnnn */
@@ -2151,7 +2392,14 @@ int nes6502_execute(int timeslice_cycles)
          OPCODE_END
 
       OPCODE_BEGIN(99)  /* STA $nnnn,Y */
+#ifdef NES6502_HOTOPS
+         FETCH_PC_WORD_DIRECT(addr);
+         addr = (addr + Y) & 0xFFFF;
+         WRITE_FAST_BYTE(addr, A);
+         ADD_CYCLES(5);
+#else
          STA(5, ABS_IND_Y_ADDR, mem_writebyte, addr);
+#endif
          OPCODE_END
 
       OPCODE_BEGIN(9A)  /* TXS */
@@ -2199,7 +2447,14 @@ int nes6502_execute(int timeslice_cycles)
          OPCODE_END
 
       OPCODE_BEGIN(A5)  /* LDA $nn */
+#ifdef NES6502_HOTOPS
+         FETCH_PC_BYTE_DIRECT(baddr);
+         A = ZP_READBYTE(baddr);
+         SET_NZ_FLAGS(A);
+         ADD_CYCLES(3);
+#else
          LDA(3, ZERO_PAGE_BYTE);
+#endif
          OPCODE_END
 
       OPCODE_BEGIN(A6)  /* LDX $nn */
@@ -2231,7 +2486,14 @@ int nes6502_execute(int timeslice_cycles)
          OPCODE_END
 
       OPCODE_BEGIN(AD)  /* LDA $nnnn */
+#ifdef NES6502_HOTOPS
+         FETCH_PC_WORD_DIRECT(addr);
+         READ_FAST_BYTE(addr, A);
+         SET_NZ_FLAGS(A);
+         ADD_CYCLES(4);
+#else
          LDA(4, ABSOLUTE_BYTE);
+#endif
          OPCODE_END
 
       OPCODE_BEGIN(AE)  /* LDX $nnnn */
@@ -2291,7 +2553,16 @@ int nes6502_execute(int timeslice_cycles)
          OPCODE_END
 
       OPCODE_BEGIN(BD)  /* LDA $nnnn,X */
+#ifdef NES6502_HOTOPS
+         FETCH_PC_WORD_DIRECT(addr);
+         addr = (addr + X) & 0xFFFF;
+         PAGE_CROSS_CHECK(addr, X);
+         READ_FAST_BYTE(addr, A);
+         SET_NZ_FLAGS(A);
+         ADD_CYCLES(4);
+#else
          LDA(4, ABS_IND_X_BYTE_READ);
+#endif
          OPCODE_END
 
       OPCODE_BEGIN(BE)  /* LDX $nnnn,Y */
@@ -2335,7 +2606,13 @@ int nes6502_execute(int timeslice_cycles)
          OPCODE_END
 
       OPCODE_BEGIN(C9)  /* CMP #$nn */
+#ifdef NES6502_HOTOPS
+         FETCH_PC_BYTE_DIRECT(data);
+         _COMPARE(A, data);
+         ADD_CYCLES(2);
+#else
          CMP(2, IMMEDIATE_BYTE);
+#endif
          OPCODE_END
 
       OPCODE_BEGIN(CA)  /* DEX */
@@ -2363,7 +2640,11 @@ int nes6502_execute(int timeslice_cycles)
          OPCODE_END
 
       OPCODE_BEGIN(D0)  /* BNE $nnnn */
+#ifdef NES6502_HOTOPS
+         HOT_RELATIVE_BRANCH(0 != z_flag);
+#else
          BNE();
+#endif
          OPCODE_END
 
       OPCODE_BEGIN(D1)  /* CMP ($nn),Y */
@@ -2468,7 +2749,11 @@ int nes6502_execute(int timeslice_cycles)
          OPCODE_END
 
       OPCODE_BEGIN(F0)  /* BEQ $nnnn */
+#ifdef NES6502_HOTOPS
+         HOT_RELATIVE_BRANCH(0 == z_flag);
+#else
          BEQ();
+#endif
          OPCODE_END
 
       OPCODE_BEGIN(F1)  /* SBC ($nn),Y */
