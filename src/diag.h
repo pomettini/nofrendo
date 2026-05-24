@@ -8,8 +8,13 @@ void diag_frame_begin(void);
 void diag_frame_end(void);
 void diag_render_begin(bool draw_flag);
 void diag_render_end(void);
+#ifdef DIAG_CPU_EXEC_TIMING
 void diag_cpu_execute_begin(void);
 void diag_cpu_execute_end(void);
+#else
+#define diag_cpu_execute_begin()   ((void)0)
+#define diag_cpu_execute_end()     ((void)0)
+#endif
 bool diag_ppu_bg_enabled(void);
 bool diag_ppu_sprites_enabled(void);
 void diag_set_ppu_bg_enabled(bool enabled);

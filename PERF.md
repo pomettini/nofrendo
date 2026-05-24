@@ -36,7 +36,9 @@ Sample output:
 ```
 
 The banner includes the diagnostic build timestamp and the active audio, background, sprite,
-and scanline-blit flags. Check it before comparing a matrix row against the baseline.
+scanline-blit, CPU experiment, and CPU-split timing flags. Check it before comparing a
+matrix row against the baseline. `cpu_split=on` means every `nes6502_execute()` batch is
+timed; use it for attribution, not final speed rows.
 
 **Do not use DWT cycle counter (0xE0001000 / 0xE000EDFC)** — debug-privileged registers,
 cause HardFault on device and segfault on simulator.
@@ -751,7 +753,7 @@ Findings:
 - The next candidate should keep the approach narrower: specialize only the opcodes that the
   profile proved are hot in Mario's slow windows.
 
-### 6502 hot opcode specialization - pending device results
+### 6502 hot opcode specialization - mixed/inconclusive with CPU-split timing
 
 This candidate keeps the known-good baseline (`cpu_batch=16`, `cpu_opt=O3`, spin/profile/
 align/fastPC off) and enables `cpu_hotops=on`. It hand-specializes only the opcodes that
@@ -770,9 +772,256 @@ surface.
 Build/install status:
 
 - Built and installed over the single `Games/nofrendo.pdx` on 2026-05-24.
-- Expected banner timestamp: `build=2026-05-24 12:41:50`.
+- Local reinstall banner timestamp: `build=2026-05-24 12:41:50`; submitted log banner:
+  `build=2026-05-24 12:41:37` with the same flags.
 - Expected settings: `cpu_batch=16`, `cpu_opt=O3`, `cpu_spin=off`, `cpu_prof=off`,
   `cpu_fastpc=off`, `cpu_hotops=on`, `prg_align=off`.
+
+Device row with CPU-exec split timing still enabled:
+
+| Segment in submitted log | fps | avg | cpu_only | cpu_exec | ppu_full | ppu_exec |
+|---|---:|---:|---:|---:|---:|---:|
+| Fast level windows, frames 60-300 | 46-49 | 20-22 ms | 6-13 ms | 4-11 ms | 18-23 ms | 5-11 ms |
+| First slowdown/ramp, frames 360-840 | 39-44 | 22-25 ms | 11-18 ms | 9-16 ms | 23-27 ms | 9-16 ms |
+| Busy mid-level windows, frames 900-1440 | 35-40 | 24-28 ms | 16-21 ms | 14-19 ms | 26-29 ms | 14-18 ms |
+| Worst hotops window, frames 1500-1620 | 31-34 | 28-31 ms | 21-23 ms | 20-22 ms | 30-33 ms | 18-21 ms |
+| Recovery/tail, frames 1680-2520 | 35-43 | 23-27 ms | 13-20 ms | 11-18 ms | 24-29 ms | 11-17 ms |
+
+Findings:
+
+- This does not prove a hot-op win. The stubborn slowdown still reaches `fps=31`,
+  `avg=31 ms`, `cpu_only=23 ms`, `cpu_exec=22 ms`, `ppu_full=33 ms`.
+- The remaining slow frame is still pure CPU interpreter work, not draw/blit/audio.
+- This row is contaminated by the attribution timer around every CPU batch. Make that split
+  optional and retest the same hot-op build with `cpu_split=off` before deciding whether to
+  keep or revert `NES6502_HOTOPS`.
+
+Retest package installed:
+
+- Built and installed over the single `Games/nofrendo.pdx` on 2026-05-24.
+- Expected banner: `build=2026-05-24 18:26:36`, `cpu_hotops=on`, `cpu_split=off`.
+- This row should be compared against the earlier best non-split O3 baseline and against
+  the split-timed hot-op row above.
+
+Clean device row:
+
+- Submitted banner: `build=2026-05-24 18:26:23`, `cpu_hotops=on`, `cpu_split=off`.
+
+| Segment in submitted log | fps | avg | cpu_only | ppu_full |
+|---|---:|---:|---:|---:|
+| Fast level windows, frames 60-300 | 44-49 | 20-22 ms | 6-13 ms | 16-22 ms |
+| First slowdown/ramp, frames 360-780 | 40-45 | 22-24 ms | 12-18 ms | 22-25 ms |
+| Busy mid-level windows, frames 840-1200 | 36-41 | 24-27 ms | 17-21 ms | 25-28 ms |
+| Late busy windows, frames 1260-1680 | 34-42 | 23-28 ms | 15-22 ms | 24-30 ms |
+| Recovery/tail, frames 1740-2640 | 36-44 | 22-27 ms | 13-20 ms | 23-28 ms |
+
+Findings from the clean row:
+
+- Removing CPU-split timing improves the numbers versus the split-timed hot-op row, but the
+  hot-op specialization still does not beat the best plain O3 baseline.
+- The worst submitted window is frame 1680: `fps=34`, `avg=28 ms`, `cpu_only=22 ms`,
+  `ppu_full=30 ms`.
+- Keep `NES6502_HOTOPS=OFF` for the main speed baseline. Leave the option available for
+  future per-ROM experiments, but do not promote it.
+- Next speed-first row: audio-off on the current baseline (`audio=off`, `cpu_batch=16`,
+  `cpu_opt=O3`, `cpu_hotops=off`, `cpu_split=off`). Audio work is partly outside the render
+  metric and partly in CPU memory handlers, so it is worth retesting on the current baseline.
+
+### Audio-off current baseline - useful but not sufficient
+
+This row disables APU/audio while keeping the current speed baseline otherwise unchanged:
+`cpu_batch=16`, `cpu_opt=O3`, `cpu_loop_align=off`, `cpu_spin=off`, `cpu_hotops=off`,
+`cpu_split=off`, `prg_align=off`.
+
+Device row:
+
+- Submitted banner: `build=2026-05-24 18:31:08`, `audio=off`.
+
+| Segment in submitted log | fps | avg | cpu_only | ppu_full |
+|---|---:|---:|---:|---:|
+| Fast level windows, frames 60-300 | 47-49 | 20-21 ms | 5-14 ms | 14-22 ms |
+| First slowdown/ramp, frames 360-840 | 42-49 | 20-23 ms | 11-19 ms | 20-26 ms |
+| Busy mid-level windows, frames 900-1680 | 36-45 | 22-27 ms | 16-23 ms | 24-30 ms |
+| Recovery/tail, frames 1740-2640 | 41-47 | 21-24 ms | 13-20 ms | 22-27 ms |
+
+Findings:
+
+- Audio removal helps the light and tail windows. Several sections sit at `46-49 fps`
+  where the audio-on baseline was usually `43-45 fps`.
+- It does not fix the release-blocking dips. The busy windows still hit `cpu_only=23 ms`
+  and `ppu_full=30 ms`, so even a no-audio build cannot sustain a 20 ms NES frame budget
+  during enemy/item-heavy sections.
+- Audio is not the main blocker. The next useful test must reduce or avoid CPU interpreter
+  work in those busy windows.
+
+### Fast sprite-zero strike with wider CPU batches - regression
+
+Batch 32 previously produced attractive host frame timings but made Mario feel like slow
+motion. The most likely cause is that PPU scanline rendering was allowed to run far ahead
+of CPU execution, while `PPUSTATUS` still served sprite-zero hit using the CPU cycle count
+from the current batch. Games that poll sprite-zero can then wait too long even when the
+host frame rate looks good.
+
+New speed-first experiment:
+
+- `PPU_FAST_STRIKE=ON` makes sprite-zero hit visible as soon as the renderer/fake-OAM path
+  detects it, ignoring the remaining pixel-to-CPU-cycle delay.
+- `diag-faststrike` combines that deliberate timing inaccuracy with `cpu_batch=32`.
+- This is intentionally less accurate. It is only worth keeping if it removes the old
+  batch-32 slow-motion feel while preserving or improving the high-fps windows.
+
+Build/install status:
+
+- Built with `make diag-faststrike` and installed over the single `Games/nofrendo.pdx` on
+  2026-05-24.
+- Expected device banner: `build=2026-05-24 18:37:50`, `audio=on`, `ppu_strike=early`,
+  `cpu_batch=32`, `cpu_opt=O3`, `cpu_hotops=off`, `cpu_split=off`.
+
+Result:
+
+- The user reports that this build still runs in slow motion.
+- It also causes serious graphical/gameplay corruption: Mario got stuck inside a pipe and
+  softlocked.
+- Do not promote `PPU_FAST_STRIKE`, and do not use wider CPU batches with this timing
+  shortcut. The old batch-32 slow-motion problem is not fixed by simply returning
+  sprite-zero hit earlier; the broader scanline/CPU timing model is too unstable.
+- Restore the active device build to the batch-16/O3 baseline before continuing.
+- Restored device build: `build=2026-05-24 18:42:51`, `audio=on`, `ppu_strike=cycle`,
+  `cpu_batch=16`, `cpu_opt=O3`, `cpu_hotops=off`, `cpu_split=off`.
+
+### 6502 RAM-mirror fast path - flat/slightly worse
+
+This candidate keeps the stable timing row (`cpu_batch=16`, `cpu_opt=O3`, no fastPC,
+no hotops) and enables `NES6502_FAST_MEMIO`.
+
+What changes:
+
+- `mem_readbyte()` and `mem_writebyte()` bypass the generic handler-table scan only for
+  mirrored CPU RAM `$0800-$1FFF`.
+- PPU registers `$2000-$3FFF`, APU/input/DMA `$4000-$4017`, mapper handlers, and expansion
+  handlers still use the original handler table.
+
+Why it is worth trying:
+
+- The opcode profile showed slow windows heavy in absolute loads/stores and real game logic.
+  Some of those touch mirrored RAM through `mem_readbyte()` / `mem_writebyte()`, where the
+  old path scans the handler table before calling the RAM mirror handler.
+- This should not affect CPU/PPU timing or scanline scheduling. It is a dispatch overhead
+  reduction, not an emulation shortcut.
+- Expected win is likely small, but it targets the CPU-only floor without reintroducing the
+  batch-32 timing instability.
+- A broader direct-I/O version was rejected before testing performance: it crashed the
+  Playdate. Likely cause: these memory helpers live in the copied CPU execution block on
+  device, and direct calls from copied code to out-of-section PPU/APU functions do not
+  relocate like the simulator path. Handler-table function-pointer calls are safe, so this
+  revised version keeps all I/O on the original handler path.
+
+Build target:
+
+- `make diag-fastmem`
+- Expected settings: `cpu_batch=16`, `cpu_opt=O3`, `cpu_memio=ram`,
+  `cpu_hotops=off`, `cpu_fastpc=off`, `cpu_split=off`.
+- Rejected broader direct-I/O row: simulator banner `build=2026-05-24 18:48:56`,
+  `ppu_strike=cycle`, `cpu_batch=16`, `cpu_opt=O3`, `cpu_memio=direct`,
+  `cpu_hotops=off`, `cpu_fastpc=off`, `cpu_split=off`, `prg_align=off`.
+- Revised RAM-only row built locally on 2026-05-24. Simulator banner:
+  `build=2026-05-24 19:06:03`, `ppu_strike=cycle`, `cpu_batch=16`,
+  `cpu_opt=O3`, `cpu_memio=ram`, `cpu_hotops=off`, `cpu_fastpc=off`,
+  `cpu_split=off`, `prg_align=off`.
+- Installed over the single device `Games/nofrendo.pdx` on 2026-05-24 after replacing the
+  crashing broader direct-I/O package.
+- Submitted device row banner: `build=2026-05-24 19:05:51`, `cpu_memio=ram`.
+
+| Segment in submitted log | fps | avg | cpu_only | ppu_full |
+|---|---:|---:|---:|---:|
+| Fast level windows, frames 60-240 | 46-50 | 20-21 ms | 7-13 ms | 17-19 ms |
+| First slowdown/ramp, frames 300-780 | 38-45 | 22-26 ms | 12-19 ms | 22-27 ms |
+| Busy mid-level windows, frames 840-1620 | 33-41 | 23-29 ms | 17-23 ms | 25-31 ms |
+| Recovery/tail, frames 1680-2520 | 35-44 | 22-28 ms | 14-21 ms | 23-29 ms |
+
+Findings:
+
+- The RAM-only fast path is stable on device, unlike the broader direct-I/O version.
+- It does not improve the release-blocking windows. Worst windows still reach
+  `cpu_only=23 ms` and `ppu_full=31 ms`.
+- Do not promote `NES6502_FAST_MEMIO`; leave it off for the speed baseline.
+
+### 6502 self-JMP spin fast-forward - regression
+
+This candidate keeps the stable row (`cpu_batch=16`, `cpu_opt=O3`, no fastPC, no hotops,
+no fastmem) and enables `NES6502_JMP_SPIN`.
+
+Why it is worth trying:
+
+- The opcode profile showed `4C` (`JMP absolute`) dominating many windows, even in some
+  busy scenes. In games like SMB, the main thread often waits for NMI in a self-`JMP`
+  loop while the real frame/game work happens from NMI.
+- When `JMP absolute` targets its own opcode address, the loop can only be escaped by an
+  interrupt or reset. In this emulator, those events are injected between CPU slices, so
+  it is safe enough for this speed-first mode to burn the rest of the current CPU slice
+  instead of interpreting thousands of repeated `JMP` instructions.
+- This targets idle-loop interpreter waste without widening CPU batches, so it should not
+  repeat the `cpu_batch=32` slow-motion failure.
+
+Build target:
+
+- `make diag-jmpspin`
+- Expected settings: `cpu_batch=16`, `cpu_opt=O3`, `cpu_jmpspin=on`,
+  `cpu_memio=table`, `cpu_hotops=off`, `cpu_fastpc=off`, `cpu_split=off`.
+- Built locally on 2026-05-24. Simulator banner: `build=2026-05-24 19:14:18`,
+  `ppu_strike=cycle`, `cpu_batch=16`, `cpu_opt=O3`, `cpu_memio=table`,
+  `cpu_jmpspin=on`, `cpu_hotops=off`, `cpu_fastpc=off`, `cpu_split=off`,
+  `prg_align=off`.
+- Installed over the single device `Games/nofrendo.pdx` on 2026-05-24.
+
+Device result:
+
+| Segment in submitted log | fps | avg | cpu_only | ppu_full |
+|---|---:|---:|---:|---:|
+| Early light windows, frames 60-180 | 39-50 | 20-25 ms | 3-14 ms | 13-26 ms |
+| Pathological spike, frame 240 | 22 | 44 ms | 55 ms | 19 ms |
+| First playable stretch, frames 300-840 | 33-37 | 26-29 ms | 19-23 ms | 28-31 ms |
+
+Findings:
+
+- This is a real regression. The frame-240 `cpu_only=55 ms` spike means the fast-forwarded
+  self-`JMP` loop can burn or misplace far more CPU slice budget than it saves.
+- The later enemy/gameplay windows still sit around `cpu_only=21-23 ms` and
+  `ppu_full=29-31 ms`, so it does not solve the release-blocking slowdown.
+- Do not promote `NES6502_JMP_SPIN`; leave it off for the speed baseline.
+- Restore the active device build to plain batch-16/O3/table-memory before continuing.
+
+### 6502 linear PRG-ROM fast path - pending device results
+
+This candidate keeps the stable timing row (`cpu_batch=16`, `cpu_opt=O3`, no fastPC,
+no hotops, no fastmem, no spin hacks) and enables `NES6502_LINEAR_ROM`.
+
+What changes:
+
+- `nes6502_setcontext()` checks whether CPU pages `$8000-$FFFF` point to one contiguous
+  32 KB host-memory block.
+- If they do, ROM byte reads and ROM word reads use a single base pointer instead of
+  indexing `cpu.mem_page[address >> 12]` and masking the address for every access.
+- If a mapper has non-contiguous or bank-switched PRG pages, the fast path disables itself
+  and falls back to the original page-table path.
+
+Why it is worth trying:
+
+- The remaining Mario slowdowns are CPU-exec heavy, and the opcode profile points at real
+  game-code/data-table work rather than draw/blit/audio.
+- SMB's mapper-0 PRG layout should be contiguous, so this targets both operand word fetches
+  and ROM data-table reads without changing scanline timing.
+- The expected win is modest but more relevant than the RAM-mirror fast path because the
+  slow windows are dominated by ROM code and ROM table traffic.
+
+Build target:
+
+- `make diag-linearrom`
+- Expected settings: `cpu_batch=16`, `cpu_opt=O3`, `cpu_rom=linear`,
+  `cpu_memio=table`, `cpu_jmpspin=off`, `cpu_hotops=off`, `cpu_fastpc=off`,
+  `cpu_split=off`.
+- Built and installed over the single device `Games/nofrendo.pdx` on 2026-05-25.
+- Expected device banner: `build=2026-05-25 01:22:16`, `cpu_rom=linear`.
 
 ### Rendered-sprite pattern cache gating - regression
 
@@ -937,6 +1186,42 @@ Build status on 2026-05-24:
 - The hot-opcode specialization candidate was built and installed over the single
   `Games/nofrendo.pdx`. Expected banner timestamp: `build=2026-05-24 12:41:50`, with
   `cpu_fastpc=off` and `cpu_hotops=on`.
+- CPU-exec split timing is now optional (`DIAG_CPU_EXEC_TIMING`). Normal speed rows report
+  `cpu_split=off` and omit `cpu_exec`; attribution rows can be rebuilt with
+  `make diag-cpusplit`. A clean hot-op retest was installed as the single
+  `Games/nofrendo.pdx` with expected banner `build=2026-05-24 18:26:36`.
+- The clean hot-op retest was flat/slightly worse against the best O3 baseline. The next
+  row is a current-baseline audio-off package: `cpu_batch=16`, `cpu_opt=O3`,
+  `cpu_hotops=off`, `cpu_split=off`.
+- The current-baseline audio-off package was built and installed over the single
+  `Games/nofrendo.pdx`. Expected banner: `build=2026-05-24 18:31:20`, `audio=off`,
+  `cpu_batch=16`, `cpu_hotops=off`, `cpu_split=off`.
+- The submitted audio-off row improved easy windows but still reached `cpu_only=23 ms`
+  and `ppu_full=30 ms` in busy windows. Audio is not the release-blocking bottleneck.
+- Added `PPU_FAST_STRIKE` plus `make diag-faststrike`: a deliberately inaccurate batch-32
+  retest that returns sprite-zero hit immediately after detection. This tests whether the
+  old `cpu_batch=32` slow-motion problem was mostly sprite-zero `PPUSTATUS` timing.
+- `PPU_FAST_STRIKE` was rejected: it still ran in slow motion and caused serious
+  graphical/gameplay corruption. The active device build was restored to the batch-16/O3
+  baseline.
+- Added `NES6502_FAST_MEMIO` plus `make diag-fastmem`. The first broad direct-I/O version
+  crashed on device because copied CPU code cannot safely direct-call out-of-section
+  PPU/APU handlers. The revised version only bypasses the table for RAM mirrors.
+- The revised RAM-mirror fast path is stable but flat/slightly worse. Added
+  `NES6502_JMP_SPIN` plus `make diag-jmpspin`, a speed-first self-`JMP` idle-loop
+  fast-forward.
+- The self-`JMP` idle-loop fast-forward regressed badly, including a submitted
+  `cpu_only=55 ms` spike. Keep `NES6502_JMP_SPIN=OFF`.
+
+Build status on 2026-05-25:
+
+- Added `NES6502_LINEAR_ROM` plus `make diag-linearrom`. This keeps the stable batch-16/O3
+  row and only bypasses `cpu.mem_page[]` lookups when `$8000-$FFFF` is detected as one
+  contiguous PRG block.
+- `make diag-linearrom` succeeds for device and simulator packages.
+- Installed the linear-ROM row over the single device `Games/nofrendo.pdx`. Expected
+  banner: `build=2026-05-25 01:22:16`, `cpu_batch=16`, `cpu_opt=O3`,
+  `cpu_memio=table`, `cpu_jmpspin=off`, `cpu_rom=linear`, `cpu_split=off`.
 
 ### Background tile CHR cache — only if DTCM becomes available
 
@@ -976,11 +1261,19 @@ make diag-noblit     # diagnostic build, Playdate scanline blit disabled
 make diag-noaudio    # diagnostic build, audio disabled
 make diag-opprofile  # diagnostic build, opcode counter enabled
 make diag-fastpc     # diagnostic build, fast PC operand/branch path enabled
+make diag-faststrike # diagnostic build, batch-32 with immediate sprite-zero hit
+make diag-fastmem    # diagnostic build, RAM mirror fast path enabled
+make diag-jmpspin    # diagnostic build, self-JMP idle-loop fast-forward enabled
+make diag-linearrom  # diagnostic build, contiguous PRG-ROM fast path enabled
 make install-diag-nobg       # build + push as nofrendo.pdx
 make install-diag-nosprites  # build + push as nofrendo.pdx
 make install-diag-noblit     # build + push as nofrendo.pdx
 make install-diag-noaudio    # build + push as nofrendo.pdx
 make install-diag-opprofile  # build + push as nofrendo.pdx
 make install-diag-fastpc     # build + push as nofrendo.pdx
+make install-diag-faststrike # build + push as nofrendo.pdx
+make install-diag-fastmem    # build + push as nofrendo.pdx
+make install-diag-jmpspin    # build + push as nofrendo.pdx
+make install-diag-linearrom  # build + push as nofrendo.pdx
 PORT=/dev/cu.XXX make install   # override auto-detected serial port
 ```

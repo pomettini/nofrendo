@@ -255,8 +255,13 @@ static void ppu_setstrike(int x_loc)
    {
       ppu.strikeflag = true;
 
+#ifdef PPU_FAST_STRIKE
+      (void) x_loc;
+      ppu.strike_cycle = nes6502_getcycles(false);
+#else
       /* 3 pixels per cpu cycle */
       ppu.strike_cycle = nes6502_getcycles(false) + (x_loc / 3);
+#endif
    }
 }
 
@@ -369,8 +374,12 @@ uint8 ppu_read(uint32 address)
 
       if (ppu.strikeflag)
       {
+#ifdef PPU_FAST_STRIKE
+         value |= PPU_STATF_STRIKE;
+#else
          if (nes6502_getcycles(false) >= ppu.strike_cycle)
             value |= PPU_STATF_STRIKE;
+#endif
       }
 
       /* clear both vblank flag and vram address flipflop */

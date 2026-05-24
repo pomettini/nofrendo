@@ -950,6 +950,31 @@
    ADD_CYCLES(5); \
 }
 
+#ifdef NES6502_JMP_SPIN
+#ifdef NES6502_FAST_PC_OPS
+#define JMP_ABSOLUTE() \
+{ \
+   uint32 _jmp_pc = (PC - 1) & 0xFFFF; \
+   FETCH_PC_WORD_DIRECT(temp); \
+   PC = temp; \
+   PC_REBASE(); \
+   ADD_CYCLES(3); \
+   if (__builtin_expect(temp == _jmp_pc && remaining_cycles > 0, 0)) \
+      ADD_CYCLES(remaining_cycles); \
+}
+#else
+#define JMP_ABSOLUTE() \
+{ \
+   uint32 _jmp_pc = (PC - 1) & 0xFFFF; \
+   temp = bank_readword(PC); \
+   PC = temp; \
+   PC_REBASE(); \
+   ADD_CYCLES(3); \
+   if (__builtin_expect(temp == _jmp_pc && remaining_cycles > 0, 0)) \
+      ADD_CYCLES(remaining_cycles); \
+}
+#endif
+#else
 #ifdef NES6502_FAST_PC_OPS
 #define JMP_ABSOLUTE() \
 { \
@@ -964,6 +989,7 @@
    JUMP(PC); \
    ADD_CYCLES(3); \
 }
+#endif
 #endif
 
 #define JSR() \
@@ -1401,6 +1427,25 @@ static int remaining_cycles = 0; /* so we can release timeslice */
 /* memory region pointers */
 static uint8 *ram = NULL, *stack = NULL;
 static uint8 *null_page;
+#ifdef NES6502_LINEAR_ROM
+static uint8 *rom_linear_page8 = NULL;
+
+static void nes6502_refresh_linear_rom(void)
+{
+   uint8 *base = cpu.mem_page[8];
+
+   for (int page = 9; page < 16; page++)
+   {
+      if (cpu.mem_page[page] != base + ((page - 8) << NES6502_BANKSHIFT))
+      {
+         rom_linear_page8 = NULL;
+         return;
+      }
+   }
+
+   rom_linear_page8 = base;
+}
+#endif
 
 #ifdef NES6502_OPPROFILE
 static uint32 opcode_profile[256];
@@ -1449,6 +1494,11 @@ INLINE uint32 zp_readword(register uint8 address)
 
 INLINE uint32 bank_readword(register uint32 address)
 {
+#ifdef NES6502_LINEAR_ROM
+   if (__builtin_expect(rom_linear_page8 && address >= 0x8000 && address < 0xFFFF, 1))
+      return (uint32) (*(uint16 *)(rom_linear_page8 + (address - 0x8000)));
+#endif
+
    /* technically, this should fail if the address is $xFFF, but
    ** any code that does this would be suspect anyway, as it would
    ** be fetching a word across page boundaries, which only would
@@ -1471,6 +1521,18 @@ INLINE uint32 zp_readword(register uint8 address)
 
 INLINE uint32 bank_readword(register uint32 address)
 {
+#ifdef NES6502_LINEAR_ROM
+   if (__builtin_expect(rom_linear_page8 && address >= 0x8000 && address < 0xFFFF, 1))
+   {
+#ifdef TARGET_CPU_PPC
+      return __lhbrx(rom_linear_page8, address - 0x8000);
+#else
+      uint32 x = (uint32) *(uint16 *)(rom_linear_page8 + (address - 0x8000));
+      return (x << 8) | (x >> 8);
+#endif
+   }
+#endif
+
 #ifdef TARGET_CPU_PPC
    return __lhbrx(cpu.mem_page[address >> NES6502_BANKSHIFT], address & NES6502_BANKMASK);
 #else /* !TARGET_CPU_PPC */
@@ -1501,11 +1563,24 @@ static uint8 mem_readbyte(uint32 address)
 
    /* ROM read first: most common case (data reads from lookup tables, etc.) */
    if (address >= 0x8000)
+   {
+#ifdef NES6502_LINEAR_ROM
+      if (__builtin_expect(rom_linear_page8 != NULL, 1))
+         return rom_linear_page8[address - 0x8000];
+#endif
       return bank_readbyte(address);
+   }
 
    /* NES RAM: $0000-$07FF (zero page, stack, game variables) */
    if (address < 0x800)
       return ram[address];
+
+#ifdef NES6502_FAST_MEMIO
+   /* This function is copied with nes6502_execute on device, so avoid direct calls
+      to out-of-section handlers here. RAM mirrors are safe because they are local data. */
+   if (address < 0x2000)
+      return ram[address & 0x7FF];
+#endif
 
    /* I/O space: PPU, APU, mapper regs — check memory range handlers */
    for (mr = cpu.read_handler; mr->min_range != 0xFFFFFFFF; mr++)
@@ -1531,8 +1606,16 @@ static void mem_writebyte(uint32 address, uint8 value)
       ram[address] = value;
       return;
    }
+
+#ifdef NES6502_FAST_MEMIO
+   if (address < 0x2000)
+   {
+      ram[address & 0x7FF] = value;
+      return;
+   }
+#endif
+
    /* check memory range handlers */
-   else
    {
       for (mw = cpu.write_handler; mw->min_range != 0xFFFFFFFF; mw++)
       {
@@ -1566,6 +1649,9 @@ void nes6502_setcontext(nes6502_context *context)
 
    ram = cpu.mem_page[0];  /* quick zero-page/RAM references */
    stack = ram + STACK_OFFSET;
+#ifdef NES6502_LINEAR_ROM
+   nes6502_refresh_linear_rom();
+#endif
 }
 
 /* get the current context */

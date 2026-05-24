@@ -69,7 +69,9 @@ option(AUDIO       "Enable NES APU" OFF)
 option(PPU_BG      "Enable PPU background rendering (OFF to measure cost)" ON)
 option(PPU_SPRITES "Enable PPU sprite rendering (OFF to measure cost)" ON)
 option(PPU_BLIT    "Enable Playdate scanline blit (OFF to measure cost)" ON)
+option(PPU_FAST_STRIKE "Return sprite-zero hit as soon as it is detected" OFF)
 option(ALIGN_PRG_ROM "Align iNES PRG ROM start for cache experiments" OFF)
+option(DIAG_CPU_EXEC_TIMING "Time every nes6502_execute call in diagnostic builds" OFF)
 set(NES_CPU_BATCH_SCANLINES "1" CACHE STRING
     "Run NES CPU cycles in batches this many scanlines wide for no-hblank mappers")
 set(NES6502_OPT_LEVEL "O3" CACHE STRING
@@ -79,6 +81,9 @@ option(NES6502_SPINHACK "Fast-forward selected PPUSTATUS polling loops" OFF)
 option(NES6502_OPPROFILE "Count executed 6502 opcodes in diagnostic windows" OFF)
 option(NES6502_FAST_PC_OPS "Use pc_ptr for operand fetches and same-bank branches" OFF)
 option(NES6502_HOTOPS "Hand-specialize the hottest measured 6502 opcodes" OFF)
+option(NES6502_FAST_MEMIO "Bypass generic memory-handler scans for NES RAM mirror ranges" OFF)
+option(NES6502_JMP_SPIN "Fast-forward self-JMP idle loops to the end of the CPU slice" OFF)
+option(NES6502_LINEAR_ROM "Fast-path CPU ROM reads when $8000-$FFFF is one contiguous host block" OFF)
 if (AUDIO)
     file(GLOB AUDIO_SOURCES src/nofrendo/sndhrdw/*.c)
     list(APPEND NOFRENDO_CORE ${AUDIO_SOURCES})
@@ -105,7 +110,9 @@ set(GAME_DEFINES
     $<$<NOT:$<BOOL:${PPU_BG}>>:DISABLE_PPU_BG=1>
     $<$<NOT:$<BOOL:${PPU_SPRITES}>>:DISABLE_PPU_SPRITES=1>
     $<$<NOT:$<BOOL:${PPU_BLIT}>>:DISABLE_PPU_BLIT=1>
+    $<$<BOOL:${PPU_FAST_STRIKE}>:PPU_FAST_STRIKE=1>
     $<$<BOOL:${ALIGN_PRG_ROM}>:ALIGN_PRG_ROM=1>
+    $<$<BOOL:${DIAG_CPU_EXEC_TIMING}>:DIAG_CPU_EXEC_TIMING=1>
     NES_CPU_BATCH_SCANLINES=${NES_CPU_BATCH_SCANLINES}
     NES6502_OPT_LEVEL_LABEL="${NES6502_OPT_LEVEL}"
     $<$<BOOL:${NES6502_ALIGN_LOOPS}>:NES6502_ALIGN_LOOPS=1>
@@ -113,6 +120,9 @@ set(GAME_DEFINES
     $<$<BOOL:${NES6502_OPPROFILE}>:NES6502_OPPROFILE=1>
     $<$<BOOL:${NES6502_FAST_PC_OPS}>:NES6502_FAST_PC_OPS=1>
     $<$<BOOL:${NES6502_HOTOPS}>:NES6502_HOTOPS=1>
+    $<$<BOOL:${NES6502_FAST_MEMIO}>:NES6502_FAST_MEMIO=1>
+    $<$<BOOL:${NES6502_JMP_SPIN}>:NES6502_JMP_SPIN=1>
+    $<$<BOOL:${NES6502_LINEAR_ROM}>:NES6502_LINEAR_ROM=1>
 )
 
 # add_executable / add_library must come before including playdate_game.cmake
