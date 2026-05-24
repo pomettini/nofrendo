@@ -1427,6 +1427,53 @@ static int remaining_cycles = 0; /* so we can release timeslice */
 /* memory region pointers */
 static uint8 *ram = NULL, *stack = NULL;
 static uint8 *null_page;
+
+#ifdef NES6502_DIRECT_MEMIO
+static uint8 (*direct_read_2000_3fff)(uint32 address) = NULL;
+static uint8 (*direct_read_4000_4015)(uint32 address) = NULL;
+static uint8 (*direct_read_4016_4017)(uint32 address) = NULL;
+static void (*direct_write_2000_3fff)(uint32 address, uint8 value) = NULL;
+static void (*direct_write_4000_4013)(uint32 address, uint8 value) = NULL;
+static void (*direct_write_4015)(uint32 address, uint8 value) = NULL;
+static void (*direct_write_4014_4017)(uint32 address, uint8 value) = NULL;
+
+static void nes6502_refresh_direct_memio(void)
+{
+   nes6502_memread *mr;
+   nes6502_memwrite *mw;
+
+   direct_read_2000_3fff = NULL;
+   direct_read_4000_4015 = NULL;
+   direct_read_4016_4017 = NULL;
+   direct_write_2000_3fff = NULL;
+   direct_write_4000_4013 = NULL;
+   direct_write_4015 = NULL;
+   direct_write_4014_4017 = NULL;
+
+   for (mr = cpu.read_handler; mr && mr->min_range != 0xFFFFFFFF; mr++)
+   {
+      if (mr->min_range <= 0x2000 && mr->max_range >= 0x3FFF)
+         direct_read_2000_3fff = mr->read_func;
+      else if (mr->min_range <= 0x4000 && mr->max_range >= 0x4015)
+         direct_read_4000_4015 = mr->read_func;
+      else if (mr->min_range <= 0x4016 && mr->max_range >= 0x4017)
+         direct_read_4016_4017 = mr->read_func;
+   }
+
+   for (mw = cpu.write_handler; mw && mw->min_range != 0xFFFFFFFF; mw++)
+   {
+      if (mw->min_range <= 0x2000 && mw->max_range >= 0x3FFF)
+         direct_write_2000_3fff = mw->write_func;
+      else if (mw->min_range <= 0x4000 && mw->max_range >= 0x4013)
+         direct_write_4000_4013 = mw->write_func;
+      else if (mw->min_range == 0x4015 && mw->max_range == 0x4015)
+         direct_write_4015 = mw->write_func;
+      else if (mw->min_range <= 0x4014 && mw->max_range >= 0x4017)
+         direct_write_4014_4017 = mw->write_func;
+   }
+}
+#endif
+
 #ifdef NES6502_LINEAR_ROM
 static uint8 *rom_linear_page8 = NULL;
 
@@ -1581,6 +1628,21 @@ static uint8 mem_readbyte(uint32 address)
    if (address < 0x2000)
       return ram[address & 0x7FF];
 #endif
+#ifdef NES6502_DIRECT_MEMIO
+   if (address < 0x2000)
+      return ram[address & 0x7FF];
+
+   if (address < 0x4000 && __builtin_expect(direct_read_2000_3fff != NULL, 1))
+      return direct_read_2000_3fff(address);
+
+   if (address <= 0x4017)
+   {
+      if (address <= 0x4015 && __builtin_expect(direct_read_4000_4015 != NULL, 1))
+         return direct_read_4000_4015(address);
+      if (address >= 0x4016 && __builtin_expect(direct_read_4016_4017 != NULL, 1))
+         return direct_read_4016_4017(address);
+   }
+#endif
 
    /* I/O space: PPU, APU, mapper regs — check memory range handlers */
    for (mr = cpu.read_handler; mr->min_range != 0xFFFFFFFF; mr++)
@@ -1612,6 +1674,38 @@ static void mem_writebyte(uint32 address, uint8 value)
    {
       ram[address & 0x7FF] = value;
       return;
+   }
+#endif
+#ifdef NES6502_DIRECT_MEMIO
+   if (address < 0x2000)
+   {
+      ram[address & 0x7FF] = value;
+      return;
+   }
+
+   if (address < 0x4000 && __builtin_expect(direct_write_2000_3fff != NULL, 1))
+   {
+      direct_write_2000_3fff(address, value);
+      return;
+   }
+
+   if (address <= 0x4017)
+   {
+      if (address <= 0x4013 && __builtin_expect(direct_write_4000_4013 != NULL, 1))
+      {
+         direct_write_4000_4013(address, value);
+         return;
+      }
+      if (address == 0x4015 && __builtin_expect(direct_write_4015 != NULL, 1))
+      {
+         direct_write_4015(address, value);
+         return;
+      }
+      if (address >= 0x4014 && __builtin_expect(direct_write_4014_4017 != NULL, 1))
+      {
+         direct_write_4014_4017(address, value);
+         return;
+      }
    }
 #endif
 
@@ -1649,6 +1743,9 @@ void nes6502_setcontext(nes6502_context *context)
 
    ram = cpu.mem_page[0];  /* quick zero-page/RAM references */
    stack = ram + STACK_OFFSET;
+#ifdef NES6502_DIRECT_MEMIO
+   nes6502_refresh_direct_memio();
+#endif
 #ifdef NES6502_LINEAR_ROM
    nes6502_refresh_linear_rom();
 #endif

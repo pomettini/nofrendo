@@ -65,6 +65,7 @@ if (TOOLCHAIN STREQUAL "armgcc")
 endif()
 
 option(DIAG        "Enable performance diagnostics (logToConsole every 60 frames)" OFF)
+option(DIAG_DRAW_FPS "Draw Playdate's on-screen FPS HUD in diagnostic builds" OFF)
 option(AUDIO       "Enable NES APU" OFF)
 option(PPU_BG      "Enable PPU background rendering (OFF to measure cost)" ON)
 option(PPU_SPRITES "Enable PPU sprite rendering (OFF to measure cost)" ON)
@@ -82,6 +83,7 @@ option(NES6502_OPPROFILE "Count executed 6502 opcodes in diagnostic windows" OFF
 option(NES6502_FAST_PC_OPS "Use pc_ptr for operand fetches and same-bank branches" OFF)
 option(NES6502_HOTOPS "Hand-specialize the hottest measured 6502 opcodes" OFF)
 option(NES6502_FAST_MEMIO "Bypass generic memory-handler scans for NES RAM mirror ranges" OFF)
+option(NES6502_DIRECT_MEMIO "Bypass memory-handler scans for common RAM/PPU/APU/input ranges" OFF)
 option(NES6502_JMP_SPIN "Fast-forward self-JMP idle loops to the end of the CPU slice" OFF)
 option(NES6502_LINEAR_ROM "Fast-path CPU ROM reads when $8000-$FFFF is one contiguous host block" OFF)
 if (AUDIO)
@@ -106,6 +108,7 @@ set(GAME_DEFINES
     NDEBUG
     $<$<BOOL:${AUDIO}>:AUDIO=1>
     $<$<BOOL:${DIAG}>:DIAG=1>
+    $<$<BOOL:${DIAG_DRAW_FPS}>:DIAG_DRAW_FPS=1>
     $<$<BOOL:${DIAG}>:BUILD_TIMESTAMP="${BUILD_TIMESTAMP}">
     $<$<NOT:$<BOOL:${PPU_BG}>>:DISABLE_PPU_BG=1>
     $<$<NOT:$<BOOL:${PPU_SPRITES}>>:DISABLE_PPU_SPRITES=1>
@@ -121,6 +124,7 @@ set(GAME_DEFINES
     $<$<BOOL:${NES6502_FAST_PC_OPS}>:NES6502_FAST_PC_OPS=1>
     $<$<BOOL:${NES6502_HOTOPS}>:NES6502_HOTOPS=1>
     $<$<BOOL:${NES6502_FAST_MEMIO}>:NES6502_FAST_MEMIO=1>
+    $<$<BOOL:${NES6502_DIRECT_MEMIO}>:NES6502_DIRECT_MEMIO=1>
     $<$<BOOL:${NES6502_JMP_SPIN}>:NES6502_JMP_SPIN=1>
     $<$<BOOL:${NES6502_LINEAR_ROM}>:NES6502_LINEAR_ROM=1>
 )

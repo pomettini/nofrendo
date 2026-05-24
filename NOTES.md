@@ -20,6 +20,11 @@ Always install the current test build as `nofrendo.pdx` on the Playdate. Do not 
 separately named diagnostic copies such as `nofrendo-batchcpu16-...pdx`; keep only one
 on-device copy and let new experiments overwrite it.
 
+Diagnostic performance builds should be log-only unless the on-screen FPS HUD is explicitly
+needed. With frame skipping enabled, skipped visual frames must not mark the whole LCD dirty;
+otherwise the Playdate still performs a display update on frames where the emulator did not
+draw anything.
+
 ## What's here
 
 `src/nofrendo/` — upstream Nofrendo emulator core, unchanged. Keep it that way; all platform work goes in `src/`.

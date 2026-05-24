@@ -38,6 +38,14 @@ extern PlaydateAPI *pd;
 #define DIAG_BLIT "on"
 #endif
 
+#ifdef DIAG_DRAW_FPS
+#define DIAG_HUD_FPS "on"
+#define DIAG_LCD_DIRTY "all"
+#else
+#define DIAG_HUD_FPS "off"
+#define DIAG_LCD_DIRTY "draw"
+#endif
+
 #ifdef PPU_FAST_STRIKE
 #define DIAG_PPU_STRIKE "early"
 #else
@@ -80,7 +88,9 @@ extern PlaydateAPI *pd;
 #define DIAG_CPU_HOTOPS "off"
 #endif
 
-#ifdef NES6502_FAST_MEMIO
+#ifdef NES6502_DIRECT_MEMIO
+#define DIAG_CPU_MEMIO "direct"
+#elif defined(NES6502_FAST_MEMIO)
 #define DIAG_CPU_MEMIO "ram"
 #else
 #define DIAG_CPU_MEMIO "table"
@@ -199,6 +209,8 @@ void diag_frame_begin(void) {
                                  " bg=" DIAG_BG
                                  " sprites=" DIAG_SPRITES
                                  " blit=" DIAG_BLIT
+                                 " hudfps=" DIAG_HUD_FPS
+                                 " lcd_dirty=" DIAG_LCD_DIRTY
                                  " ppu_strike=" DIAG_PPU_STRIKE
                                  " cpu_batch=" DIAG_STRINGIFY(NES_CPU_BATCH_SCANLINES)
                                  " cpu_opt=" NES6502_OPT_LEVEL_LABEL

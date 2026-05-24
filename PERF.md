@@ -2,7 +2,7 @@
 
 Running log of profiling data, findings, and optimization decisions.
 Target: **50 fps** (PAL NES speed). Current best full-level Mario row:
-**~44-50 fps** in light windows, **~33-39 fps** in the remaining slow windows.
+**~49-50 fps** in light windows, **~37-45 fps** in the remaining slow windows.
 
 ---
 
@@ -991,7 +991,7 @@ Findings:
 - Do not promote `NES6502_JMP_SPIN`; leave it off for the speed baseline.
 - Restore the active device build to plain batch-16/O3/table-memory before continuing.
 
-### 6502 linear PRG-ROM fast path - pending device results
+### 6502 linear PRG-ROM fast path - flat/slightly worse
 
 This candidate keeps the stable timing row (`cpu_batch=16`, `cpu_opt=O3`, no fastPC,
 no hotops, no fastmem, no spin hacks) and enables `NES6502_LINEAR_ROM`.
@@ -1021,7 +1021,97 @@ Build target:
   `cpu_memio=table`, `cpu_jmpspin=off`, `cpu_hotops=off`, `cpu_fastpc=off`,
   `cpu_split=off`.
 - Built and installed over the single device `Games/nofrendo.pdx` on 2026-05-25.
-- Expected device banner: `build=2026-05-25 01:22:16`, `cpu_rom=linear`.
+- Device banner: `build=2026-05-25 01:22:16`, `cpu_rom=linear`.
+
+Device result:
+
+| Segment in submitted log | fps | avg | cpu_only | ppu_full |
+|---|---:|---:|---:|---:|
+| Early/light windows, frames 60-900 | 40-50 | 19-24 ms | 6-18 ms | 16-26 ms |
+| Busy mid-level windows, frames 1020-1980 | 32-39 | 25-30 ms | 18-24 ms | 27-31 ms |
+| Recovery/tail, frames 2040-2880 | 35-44 | 22-27 ms | 13-21 ms | 23-29 ms |
+
+Findings:
+
+- The contiguous-PRG fast path did not improve the release-blocking windows.
+- Worst submitted windows still reach `cpu_only=24 ms` and `ppu_full=31 ms`, which matches
+  the ordinary page-table path closely.
+- Do not promote `NES6502_LINEAR_ROM`; leave it off for the speed baseline.
+
+### Playdate display update skip - promoted current baseline
+
+This candidate keeps the stable CPU/PPU timing row and removes a platform-layer leak in the
+frame-skip path.
+
+What changes:
+
+- Diagnostic builds no longer draw Playdate's on-screen FPS HUD by default. Console diag
+  logging remains enabled.
+- On skipped visual frames (`FRAME_SKIP=2`, `draw=false`), `playdate_update()` no longer
+  marks the whole LCD dirty and returns `0` so Playdate can skip the display update.
+- On rendered frames, it still marks the full LCD dirty and returns `1`.
+
+Why it is worth trying:
+
+- The emulator intentionally renders only every other NES frame, but the old platform loop
+  still requested a full Playdate display update every frame.
+- This should reduce time outside `cpu_only`/`ppu_full`; those split numbers may stay similar,
+  but the logged `avg`/`fps` and the felt smoothness should improve.
+- It does not change CPU timing, PPU timing, mapper behavior, or memory mapping, so it should
+  avoid the slow-motion and softlock failures from previous timing shortcuts.
+
+Build target:
+
+- `make diag-cpuopt CPU_OPT=O3`
+- Expected settings: `hudfps=off`, `lcd_dirty=draw`, `cpu_batch=16`, `cpu_opt=O3`,
+  `cpu_rom=page`, `cpu_memio=table`, `cpu_jmpspin=off`, `cpu_split=off`.
+
+Device result:
+
+| Segment in submitted log | fps | avg | cpu_only | ppu_full |
+|---|---:|---:|---:|---:|
+| Early/light windows, frames 60-840 | 47-50 | 19-20 ms | 5-18 ms | 10-19 ms |
+| Busy mid-level windows, frames 900-1740 | 37-49 | 20-26 ms | 16-23 ms | 18-25 ms |
+| Recovery/tail, frames 1800-2640 | 43-50 | 19-23 ms | 13-20 ms | 16-21 ms |
+
+Findings:
+
+- This is the largest single win since the CPU core shrink. Most of 1-1 now sits at
+  `49-50 fps` with `avg=19-20 ms`.
+- The old diagnostic HUD and full-LCD dirty marking were forcing display work even on
+  skipped visual frames. Removing that platform tax also reduced measured draw-frame time,
+  likely by keeping the framebuffer/display path out of the emulator's hot-cache window.
+- Remaining slowdowns are now narrow and CPU-side: worst submitted window is
+  `fps=37`, `avg=26 ms`, `cpu_only=23 ms`, `ppu_full=25 ms`.
+- Promote this as the new baseline: `hudfps=off`, `lcd_dirty=draw`, `cpu_batch=16`,
+  `cpu_opt=O3`, all CPU timing hacks off.
+
+### Direct CPU memory-I/O fast path - pending device results
+
+This candidate keeps the new display-update baseline and enables `NES6502_DIRECT_MEMIO`.
+
+What changes:
+
+- `nes6502_setcontext()` caches the function pointers for the fixed handler ranges:
+  mirrored PPU registers (`$2000-$3FFF`), APU/null reads (`$4000-$4015`), controller reads
+  (`$4016-$4017`), APU writes (`$4000-$4013`, `$4015`), and OAM/input writes
+  (`$4014-$4017`).
+- `mem_readbyte()` / `mem_writebyte()` bypass the generic handler-table scan for those
+  ranges and for NES RAM mirrors (`$0800-$1FFF`).
+- It still calls handlers through function pointers, so copied CPU code does not direct-`BL`
+  out to PPU/APU code. Unusual mapper/protected ranges still fall back to the original scan.
+
+Why it is worth trying:
+
+- The remaining slow windows peak at `cpu_only=22-23 ms`, so small CPU-memory wins matter now.
+- This attacks a known interpreter overhead without widening CPU batches or changing
+  PPUSTATUS timing, which should avoid previous slow-motion failures.
+
+Build target:
+
+- `make diag-directmem`
+- Expected settings: `hudfps=off`, `lcd_dirty=draw`, `cpu_batch=16`, `cpu_opt=O3`,
+  `cpu_memio=direct`, `cpu_rom=page`, `cpu_jmpspin=off`, `cpu_split=off`.
 
 ### Rendered-sprite pattern cache gating - regression
 
@@ -1215,13 +1305,13 @@ Build status on 2026-05-24:
 
 Build status on 2026-05-25:
 
-- Added `NES6502_LINEAR_ROM` plus `make diag-linearrom`. This keeps the stable batch-16/O3
-  row and only bypasses `cpu.mem_page[]` lookups when `$8000-$FFFF` is detected as one
-  contiguous PRG block.
-- `make diag-linearrom` succeeds for device and simulator packages.
-- Installed the linear-ROM row over the single device `Games/nofrendo.pdx`. Expected
-  banner: `build=2026-05-25 01:22:16`, `cpu_batch=16`, `cpu_opt=O3`,
-  `cpu_memio=table`, `cpu_jmpspin=off`, `cpu_rom=linear`, `cpu_split=off`.
+- `NES6502_LINEAR_ROM` was tested and rejected: the full-level Mario row stayed effectively
+  flat, with busy windows still reaching `cpu_only=24 ms` and `ppu_full=31 ms`.
+- The platform-layer display-update skip is the new best baseline. It makes diagnostic
+  builds log-only by default (`hudfps=off`) and avoids marking skipped visual frames dirty.
+  Mario 1-1 now spends most windows at `49-50 fps`, with remaining dips at `37-45 fps`.
+- Next build to test: direct CPU memory-I/O fast path on top of the new display baseline,
+  expected banner field `cpu_memio=direct`.
 
 ### Background tile CHR cache — only if DTCM becomes available
 

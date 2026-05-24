@@ -32,11 +32,18 @@ static int playdate_update(void *ud) {
     osd_getinput();
     sound_fill_buffer();
     diag_frame_end();
-#ifdef DIAG
+
+#ifdef DIAG_DRAW_FPS
     pd->system->drawFPS(0, 0);
-#endif
     pd->graphics->markUpdatedRows(0, LCD_ROWS - 1);
     return 1;
+#else
+    if (draw) {
+        pd->graphics->markUpdatedRows(0, LCD_ROWS - 1);
+        return 1;
+    }
+    return 0;
+#endif
 }
 
 void osd_start_emulation(void) {
