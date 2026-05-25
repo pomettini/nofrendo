@@ -31,6 +31,8 @@ Diagnostic builds are the default during performance work. Useful probes:
 
 ```sh
 make diag
+make diag-fpslite
+make diag-fastoamdma
 make diag-fixedcycles
 make diag-fastjmp
 ```

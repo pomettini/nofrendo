@@ -1,6 +1,6 @@
 SDK      ?= $(HOME)/Developer/PlaydateSDK
 TOOLCHAIN = $(SDK)/C_API/buildsupport/arm.cmake
-FLAGS     = -DCMAKE_BUILD_TYPE=Release -DAUDIO=ON -DAUDIO_DIRECT_RING=ON -DDIAG=ON -DPPU_BG=ON -DPPU_SPRITES=ON -DPPU_BLIT=ON -DPPU_FAST_STRIKE=OFF -DPPU_SPRITE_CACHE_DRAW_ONLY=OFF -DALIGN_PRG_ROM=OFF -DDIAG_CPU_EXEC_TIMING=OFF -DNES_CPU_BATCH_SCANLINES=1 -DNES6502_OPT_LEVEL=O3 -DNES6502_ALIGN_LOOPS=OFF -DNES6502_SPINHACK=OFF -DNES6502_OPPROFILE=OFF -DNES6502_FAST_PC_OPS=OFF -DNES6502_HOTOPS=OFF -DNES6502_FAST_MEMIO=OFF -DNES6502_DIRECT_MEMIO=OFF -DNES6502_FAST_JMP_ABS=OFF -DNES6502_FAST_BRANCHES=OFF -DNES6502_FAST_OPERAND_BYTES=OFF -DNES6502_FAST_MEMOPS=OFF -DNES6502_JMP_SPIN=OFF -DNES6502_LINEAR_ROM=OFF
+FLAGS     = -DCMAKE_BUILD_TYPE=Release -DAUDIO=ON -DAUDIO_DIRECT_RING=ON -DDIAG=ON -DDIAG_FPS_ONLY=OFF -DPPU_BG=ON -DPPU_SPRITES=ON -DPPU_BLIT=ON -DPPU_FAST_STRIKE=OFF -DPPU_SPRITE_CACHE_DRAW_ONLY=OFF -DPPU_FAST_OAMDMA=OFF -DNES_FIXED_SCANLINE_CYCLES=OFF -DALIGN_PRG_ROM=OFF -DDIAG_CPU_EXEC_TIMING=OFF -DNES_CPU_BATCH_SCANLINES=1 -DNES6502_OPT_LEVEL=O3 -DNES6502_ALIGN_LOOPS=OFF -DNES6502_SPINHACK=OFF -DNES6502_OPPROFILE=OFF -DNES6502_FAST_PC_OPS=OFF -DNES6502_HOTOPS=OFF -DNES6502_FAST_MEMIO=OFF -DNES6502_DIRECT_MEMIO=OFF -DNES6502_FAST_JMP_ABS=OFF -DNES6502_FAST_BRANCHES=OFF -DNES6502_FAST_OPERAND_BYTES=OFF -DNES6502_FAST_MEMOPS=OFF -DNES6502_JMP_SPIN=OFF -DNES6502_LINEAR_ROM=OFF
 PDUTIL    = $(SDK)/bin/pdutil
 PORT      ?= $(shell ls /dev/cu.usbmodem* 2>/dev/null | head -1)
 VOLUME    ?= /Volumes/PLAYDATE
@@ -10,9 +10,9 @@ CPU_OPT   ?= O3
 FASTSTRIKE_BATCH ?= 32
 FASTBATCH ?= 24
 
-.PHONY: all device sim clean rebuild diag diag-batchcpu diag-fastbatch diag-skipcache diag-faststrike diag-alignrom diag-cpuopt diag-cpualign diag-spinhack diag-cpusplit diag-opprofile diag-fastpc diag-hotops diag-fastmem diag-directmem diag-fastjmp diag-fastbranch diag-fastopbyte diag-fastmemops diag-jmpspin diag-linearrom diag-nobg diag-nosprites diag-noblit diag-noaudio \
+.PHONY: all device sim clean rebuild diag diag-batchcpu diag-fastbatch diag-skipcache diag-fastoamdma diag-fpslite diag-fixedcycles diag-faststrike diag-alignrom diag-cpuopt diag-cpualign diag-spinhack diag-cpusplit diag-opprofile diag-fastpc diag-hotops diag-fastmem diag-directmem diag-fastjmp diag-fastbranch diag-fastopbyte diag-fastmemops diag-jmpspin diag-linearrom diag-nobg diag-nosprites diag-noblit diag-noaudio \
 	install install-diag install-diag-nobg install-diag-nosprites install-diag-noblit \
-	install-diag-noaudio install-diag-batchcpu install-diag-fastbatch install-diag-skipcache install-diag-faststrike install-diag-alignrom install-diag-cpuopt install-diag-cpualign install-diag-spinhack install-diag-cpusplit install-diag-opprofile install-diag-fastpc install-diag-hotops install-diag-fastmem install-diag-directmem install-diag-fastjmp install-diag-fastbranch install-diag-fastopbyte install-diag-fastmemops install-diag-jmpspin install-diag-linearrom
+	install-diag-noaudio install-diag-batchcpu install-diag-fastbatch install-diag-skipcache install-diag-fastoamdma install-diag-fpslite install-diag-fixedcycles install-diag-faststrike install-diag-alignrom install-diag-cpuopt install-diag-cpualign install-diag-spinhack install-diag-cpusplit install-diag-opprofile install-diag-fastpc install-diag-hotops install-diag-fastmem install-diag-directmem install-diag-fastjmp install-diag-fastbranch install-diag-fastopbyte install-diag-fastmemops install-diag-jmpspin install-diag-linearrom
 
 # Build device first so pdex.elf lands in Source/ before sim runs pdc
 all: device sim
@@ -56,6 +56,27 @@ diag-skipcache:
 	cmake -B build/device -DTOOLCHAIN=armgcc -DCMAKE_TOOLCHAIN_FILE=$(TOOLCHAIN) $(FLAGS) -DDIAG=ON -DPPU_SPRITE_CACHE_DRAW_ONLY=ON -DNES_CPU_BATCH_SCANLINES=16 -DNES6502_OPT_LEVEL=O3 -DNES6502_DIRECT_MEMIO=ON -DNES6502_FAST_JMP_ABS=ON
 	cmake --build build/device
 	cmake -B build/sim $(FLAGS) -DDIAG=ON -DPPU_SPRITE_CACHE_DRAW_ONLY=ON -DNES_CPU_BATCH_SCANLINES=16 -DNES6502_OPT_LEVEL=O3 -DNES6502_DIRECT_MEMIO=ON -DNES6502_FAST_JMP_ABS=ON
+	cmake --build build/sim
+
+# Copy OAM DMA from the mapped CPU page directly while preserving DMA cycle burn.
+diag-fastoamdma:
+	cmake -B build/device -DTOOLCHAIN=armgcc -DCMAKE_TOOLCHAIN_FILE=$(TOOLCHAIN) $(FLAGS) -DDIAG=ON -DPPU_FAST_OAMDMA=ON -DNES_CPU_BATCH_SCANLINES=16 -DNES6502_OPT_LEVEL=O3 -DNES6502_DIRECT_MEMIO=ON -DNES6502_FAST_JMP_ABS=ON
+	cmake --build build/device
+	cmake -B build/sim $(FLAGS) -DDIAG=ON -DPPU_FAST_OAMDMA=ON -DNES_CPU_BATCH_SCANLINES=16 -DNES6502_OPT_LEVEL=O3 -DNES6502_DIRECT_MEMIO=ON -DNES6502_FAST_JMP_ABS=ON
+	cmake --build build/sim
+
+# Keep useful FPS logs while removing per-frame render timer calls.
+diag-fpslite:
+	cmake -B build/device -DTOOLCHAIN=armgcc -DCMAKE_TOOLCHAIN_FILE=$(TOOLCHAIN) $(FLAGS) -DDIAG=ON -DDIAG_FPS_ONLY=ON -DPPU_FAST_OAMDMA=ON -DNES_CPU_BATCH_SCANLINES=16 -DNES6502_OPT_LEVEL=O3 -DNES6502_DIRECT_MEMIO=ON -DNES6502_FAST_JMP_ABS=ON
+	cmake --build build/device
+	cmake -B build/sim $(FLAGS) -DDIAG=ON -DDIAG_FPS_ONLY=ON -DPPU_FAST_OAMDMA=ON -DNES_CPU_BATCH_SCANLINES=16 -DNES6502_OPT_LEVEL=O3 -DNES6502_DIRECT_MEMIO=ON -DNES6502_FAST_JMP_ABS=ON
+	cmake --build build/sim
+
+# Replace the per-scanline float accumulator with exact 1/3-cycle fixed-point math.
+diag-fixedcycles:
+	cmake -B build/device -DTOOLCHAIN=armgcc -DCMAKE_TOOLCHAIN_FILE=$(TOOLCHAIN) $(FLAGS) -DDIAG=ON -DNES_FIXED_SCANLINE_CYCLES=ON -DNES_CPU_BATCH_SCANLINES=16 -DNES6502_OPT_LEVEL=O3 -DNES6502_DIRECT_MEMIO=ON -DNES6502_FAST_JMP_ABS=ON
+	cmake --build build/device
+	cmake -B build/sim $(FLAGS) -DDIAG=ON -DNES_FIXED_SCANLINE_CYCLES=ON -DNES_CPU_BATCH_SCANLINES=16 -DNES6502_OPT_LEVEL=O3 -DNES6502_DIRECT_MEMIO=ON -DNES6502_FAST_JMP_ABS=ON
 	cmake --build build/sim
 
 # Deliberately inaccurate timing row: make sprite-zero hit visible immediately so
@@ -226,6 +247,9 @@ install-diag-noaudio: diag-noaudio _push
 install-diag-batchcpu: diag-batchcpu _push
 install-diag-fastbatch: diag-fastbatch _push
 install-diag-skipcache: diag-skipcache _push
+install-diag-fastoamdma: diag-fastoamdma _push
+install-diag-fpslite: diag-fpslite _push
+install-diag-fixedcycles: diag-fixedcycles _push
 install-diag-faststrike: diag-faststrike _push
 install-diag-alignrom: diag-alignrom _push
 install-diag-cpuopt: diag-cpuopt _push

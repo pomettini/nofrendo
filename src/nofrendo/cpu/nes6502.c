@@ -1797,6 +1797,11 @@ uint8 nes6502_getbyte(uint32 address)
    return bank_readbyte(address);
 }
 
+uint8 *nes6502_getbyteptr(uint32 address)
+{
+   return cpu.mem_page[address >> NES6502_BANKSHIFT] + (address & NES6502_BANKMASK);
+}
+
 /* get number of elapsed cycles */
 uint32 nes6502_getcycles(bool reset_flag)
 {

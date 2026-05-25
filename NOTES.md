@@ -37,9 +37,13 @@ Current promoted speed line after the 2026-05-25 Mario 1-1 tests is direct audio
 display dirty-on-draw, direct CPU memory I/O, and safe fast absolute-JMP fetch. Fast branch
 and broad one-byte operand fetches were safe but mixed, so keep them off unless retesting.
 The narrow `diag-fastmemops` load/store specialization was also mixed and is not promoted.
-The `diag-fastbatch` batch-24 timing probe was also mixed and is not promoted. The next
-probe is `diag-skipcache`, which keeps the clean batch-16 directmem/fastjmp line and skips
-the render-only sprite-cache rebuild on skipped visual frames.
+The `diag-fastbatch` batch-24 timing probe was also mixed and is not promoted. The
+`diag-skipcache` sprite-cache-on-draw-only probe regressed the busy band and is not
+promoted. `diag-fixedcycles` was safe but effectively flat, so do not stack future tests on
+it. `diag-fastoamdma` was safe in Mario 1-1, with no softlocks or enemy weirdness, but did
+not move the worst `cpu_only=25 ms` band enough to promote as the main answer by itself.
+The next probe is `diag-fpslite`: keep the current speed line, keep FPS logs, but remove the
+per-frame render timer calls to check whether diagnostics are costing the last few ms.
 
 ## What's here
 

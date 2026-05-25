@@ -265,6 +265,41 @@ static void ppu_setstrike(int x_loc)
    }
 }
 
+#ifdef PPU_FAST_OAMDMA
+static void ppu_oamdma_copy(uint8 oam_loc, uint32 cpu_address)
+{
+   uint8 *src = nes6502_getbyteptr(cpu_address);
+
+   if (0 == oam_loc)
+   {
+      memcpy(ppu.oam, src, 256);
+   }
+   else
+   {
+      int count = 256 - oam_loc;
+      memcpy(ppu.oam + oam_loc, src, count);
+      memcpy(ppu.oam, src + count, oam_loc);
+   }
+}
+
+static void ppu_oamdma_fixup(uint32 cpu_address)
+{
+   uint8 *src = nes6502_getbyteptr(cpu_address);
+
+   /* Preserve the existing Nofrendo OAM DMA quirk fixup exactly, just without
+      per-byte helper calls. */
+   if ((ppu.oam_addr >> 2) & 1)
+   {
+      memcpy(ppu.oam + 4, src, 4);
+      memcpy(ppu.oam, src + 252, 4);
+   }
+   else
+   {
+      memcpy(ppu.oam, src, 8);
+   }
+}
+#endif
+
 static void ppu_oamdma(uint8 value)
 {
    uint32 cpu_address;
@@ -274,14 +309,22 @@ static void ppu_oamdma(uint8 value)
 
    /* Sprite DMA starts at the current SPRRAM address */
    oam_loc = ppu.oam_addr;
+#ifdef PPU_FAST_OAMDMA
+   ppu_oamdma_copy(oam_loc, cpu_address);
+   cpu_address += 256;
+#else
    do
    {
       ppu.oam[oam_loc++] = nes6502_getbyte(cpu_address++);
    }
    while (oam_loc != ppu.oam_addr);
+#endif
 
    /* TODO: enough with houdini */
    cpu_address -= 256;
+#ifdef PPU_FAST_OAMDMA
+   ppu_oamdma_fixup(cpu_address);
+#else
    /* Odd address in $2003 */
    if ((ppu.oam_addr >> 2) & 1)
    {
@@ -297,6 +340,7 @@ static void ppu_oamdma(uint8 value)
       for (oam_loc = 0; oam_loc < 8; oam_loc++)
          ppu.oam[oam_loc] = nes6502_getbyte(cpu_address++);
    }
+#endif
 
    /* make the CPU spin for DMA cycles */
    nes6502_burn(513);

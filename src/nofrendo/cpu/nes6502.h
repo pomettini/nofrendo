@@ -110,6 +110,7 @@ extern void nes6502_itcm_init(void *(*alloc_fn)(void *, size_t));
 extern void nes6502_nmi(void);
 extern void nes6502_irq(void);
 extern uint8 nes6502_getbyte(uint32 address);
+extern uint8 *nes6502_getbyteptr(uint32 address);
 extern uint32 nes6502_getcycles(bool reset_flag);
 extern void nes6502_burn(int cycles);
 extern void nes6502_release(void);

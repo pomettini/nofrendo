@@ -1426,7 +1426,7 @@ Finding:
 - Do not promote `cpu_batch=24`; the timing risk is not buying enough over the cleaner
   batch-16 row.
 
-### Sprite render cache only on drawn frames - pending device results
+### Sprite render cache only on drawn frames - mixed/regression
 
 This probe keeps the clean `cpu_batch=16` directmem/fastjmp baseline and avoids rebuilding
 the sprite render cache on skipped visual frames.
@@ -1457,6 +1457,110 @@ Build target:
   `cpu_memio=direct`, `cpu_fastjmp=on`, `cpu_rom=page`.
 - Built and installed over the single device `Games/nofrendo.pdx` on 2026-05-25.
   Expected device banner timestamp: `build=2026-05-25 13:40:05`.
+
+Device result:
+
+- Submitted banner: `build=2026-05-25 13:40:05`, `sprcache=draw`, `cpu_batch=16`,
+  `cpu_memio=direct`, `cpu_fastjmp=on`.
+- The early/light windows were fine, but the busy band was worse than the clean baseline:
+  frames 1500-1620 fell to `38`, `37`, then `35 fps`, with `cpu_only` rising to `26 ms`.
+- Do not promote this. The likely explanation is that rebuilding sprite pattern cache even
+  on skipped frames was warming CHR/OAM cache lines for the following drawn frame, or the
+  reduced work simply changed D-cache shape in the wrong direction.
+
+### Fixed scanline cycle accumulator - neutral/mixed
+
+This probe keeps the current promoted rendering and CPU flags but removes float math from
+the per-scanline CPU cycle accumulator.
+
+What changes:
+
+- The old code accumulates `1364.0 / 12` CPU cycles per scanline as a `float`, casts it to
+  `int` before `nes6502_execute()`, then subtracts the actual elapsed cycles.
+- `NES_FIXED_SCANLINE_CYCLES=ON` stores the same value as integer thirds: each scanline adds
+  `341`, the executor receives `scanline_cycles / 3`, and elapsed cycles subtract
+  `elapsed * 3`.
+- This preserves the same integer truncation cadence as the float path while avoiding
+  floating-point add/subtract/cast work in the 262-line frame loop.
+
+Build target:
+
+- `make diag-fixedcycles`
+- Expected settings: `audio_fill=direct`, `hudfps=off`, `lcd_dirty=draw`,
+  `ppu_strike=cycle`, `sprcache=all`, `cycleacc=fixed3`, `cpu_batch=16`,
+  `cpu_opt=O3`, `cpu_memio=direct`, `cpu_fastjmp=on`, `cpu_rom=page`.
+- Built successfully for device and simulator on 2026-05-25, then installed over the single
+  device `Games/nofrendo.pdx`. Banner timestamp: `build=2026-05-25 20:43:59`.
+
+Device result:
+
+- Submitted banner: `build=2026-05-25 20:43:59`, `cycleacc=fixed3`, `cpu_batch=16`,
+  `cpu_memio=direct`, `cpu_fastjmp=on`.
+- The row is safe-looking but flat/slightly worse in the slow band: frames 1500-1620 were
+  `38`, `38`, then `35 fps`, with `cpu_only=24-25 ms`.
+- Do not promote this for now. The float operations were not the remaining bottleneck, and
+  future probes should return to the clean `cycleacc=float` baseline.
+
+### Fast OAM DMA page copy - safe but flat
+
+This probe targets a per-frame sprite path that still used byte-at-a-time CPU memory reads.
+NES games commonly write `$4014` every frame to DMA a 256-byte CPU page into OAM; Mario uses
+this path heavily because enemy/item slowdowns correlate with sprite activity.
+
+What changes:
+
+- `PPU_FAST_OAMDMA=ON` replaces the 256 `nes6502_getbyte()` calls in `ppu_oamdma()` with
+  direct copies from the mapped CPU memory page.
+- The existing Nofrendo OAM fixup bytes are preserved, also using direct copies.
+- The emulated timing stays the same: `nes6502_burn(513)` and `nes6502_release()` are
+  unchanged.
+- This should be safe for the current mapper path because `nes6502_getbyte()` itself reads
+  directly from `cpu.mem_page[]`; it does not invoke read handlers.
+
+Build target:
+
+- `make diag-fastoamdma`
+- Expected settings: `audio_fill=direct`, `hudfps=off`, `lcd_dirty=draw`,
+  `ppu_strike=cycle`, `sprcache=all`, `oamdma=fast`, `cycleacc=float`, `cpu_batch=16`,
+  `cpu_opt=O3`, `cpu_memio=direct`, `cpu_fastjmp=on`, `cpu_rom=page`.
+- Built successfully for device and simulator on 2026-05-25, then installed over the single
+  device `Games/nofrendo.pdx`. Banner timestamp: `build=2026-05-25 21:52:06`.
+
+Device result:
+
+- Submitted banner: `build=2026-05-25 21:52:06`, `oamdma=fast`, `cycleacc=float`,
+  `cpu_batch=16`, `cpu_memio=direct`, `cpu_fastjmp=on`.
+- The row is safe in Mario 1-1: no softlocks, no weird enemy behavior, and only minor
+  pre-existing 1-2 frame visual glitches.
+- It does not solve the remaining slow band. Busy windows still hit `39-43 fps` around
+  frames 840-1200 and `35 fps` at frame 1620, with `cpu_only` still reaching `25 ms`.
+- Keep the code as a safe optional micro-optimization, but do not treat it as the main path
+  to stable 50 fps.
+
+### FPS-only diagnostics - pending device results
+
+This probe tests whether the diagnostic hooks themselves are stealing enough time to matter.
+The normal diagnostic row calls `getCurrentTimeMilliseconds()` around every
+`nes_renderframe()` so it can split `cpu_only` and `ppu_full`. That is useful for
+attribution, but it is not release-like.
+
+What changes:
+
+- `DIAG_FPS_ONLY=ON` leaves the 60-frame FPS window and build banner intact.
+- `diag_render_begin()` and `diag_render_end()` become no-ops, removing two time reads per
+  emulated frame.
+- Logs intentionally drop `cpu_only` and `ppu_full`; use this row to judge real gameplay
+  smoothness and overall `fps/avg`, not subsystem attribution.
+
+Build target:
+
+- `make diag-fpslite`
+- Expected settings: `diag=fps`, `audio_fill=direct`, `hudfps=off`, `lcd_dirty=draw`,
+  `ppu_strike=cycle`, `sprcache=all`, `oamdma=fast`, `cycleacc=float`, `cpu_batch=16`,
+  `cpu_opt=O3`, `cpu_memio=direct`, `cpu_fastjmp=on`, `cpu_rom=page`.
+- Built successfully for device and simulator on 2026-05-26, then installed over the single
+  device `Games/nofrendo.pdx`. Expected device banner timestamp:
+  `build=2026-05-26 00:14:04`.
 
 ### Rendered-sprite pattern cache gating - regression
 
@@ -1674,6 +1778,17 @@ Build status on 2026-05-25:
 - `diag-fastbatch` was tested and also rejected as mixed. It still reached `cpu_only=25 ms`
   in the busy mid-level band. The next probe is `diag-skipcache`, which keeps batch 16 and
   skips render-only sprite-cache construction on skipped visual frames.
+- `diag-skipcache` was tested and rejected as mixed/regression. It reached `cpu_only=26 ms`
+  in the busy band. The next probe is `diag-fixedcycles`, which keeps batch 16,
+  `cpu_memio=direct`, and `cpu_fastjmp=on`, but replaces the float scanline cycle
+  accumulator with exact integer thirds.
+- `diag-fixedcycles` was tested and left unpromoted: safe, but flat/slightly worse in the
+  slow band, still reaching `cpu_only=25 ms`. The next probe is `diag-fastoamdma`, a direct
+  CPU-page copy for `$4014` sprite DMA with the same emulated 513-cycle burn.
+- `diag-fastoamdma` was tested and is safe, but flat for the remaining problem: Mario 1-1
+  still reaches `cpu_only=25 ms` and `35 fps` in the busy band. The next probe is
+  `diag-fpslite`, which removes per-frame render timing while keeping 60-frame FPS logs so
+  we can compare against a more release-like build.
 
 ### Background tile CHR cache — only if DTCM becomes available
 
@@ -1725,6 +1840,9 @@ make diag-fastopbyte # diagnostic build, fast one-byte operand fetch enabled
 make diag-fastmemops # diagnostic build, hot memory load/store opcodes specialized
 make diag-fastbatch  # diagnostic build, directmem/fastjmp with FASTBATCH scanline batches
 make diag-skipcache  # diagnostic build, skip sprite render-cache rebuilds on skipped frames
+make diag-fastoamdma # diagnostic build, direct CPU-page copy for OAM DMA
+make diag-fpslite   # diagnostic build, FPS-only logs without render timing hooks
+make diag-fixedcycles # diagnostic build, fixed-point scanline cycle accumulator
 make diag-jmpspin    # diagnostic build, self-JMP idle-loop fast-forward enabled
 make diag-linearrom  # diagnostic build, contiguous PRG-ROM fast path enabled
 make install-diag-nobg       # build + push as nofrendo.pdx
@@ -1742,6 +1860,9 @@ make install-diag-fastopbyte # build + push as nofrendo.pdx
 make install-diag-fastmemops # build + push as nofrendo.pdx
 make install-diag-fastbatch  # build + push as nofrendo.pdx
 make install-diag-skipcache  # build + push as nofrendo.pdx
+make install-diag-fastoamdma # build + push as nofrendo.pdx
+make install-diag-fpslite    # build + push as nofrendo.pdx
+make install-diag-fixedcycles # build + push as nofrendo.pdx
 make install-diag-jmpspin    # build + push as nofrendo.pdx
 make install-diag-linearrom  # build + push as nofrendo.pdx
 PORT=/dev/cu.XXX make install   # override auto-detected serial port

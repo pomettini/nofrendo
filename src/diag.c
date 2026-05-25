@@ -14,6 +14,12 @@ extern PlaydateAPI *pd;
 #define DIAG_STRINGIFY_INNER(value) #value
 #define DIAG_STRINGIFY(value) DIAG_STRINGIFY_INNER(value)
 
+#ifdef DIAG_FPS_ONLY
+#define DIAG_MODE "fps"
+#else
+#define DIAG_MODE "split"
+#endif
+
 #if AUDIO
 #define DIAG_AUDIO "on"
 #ifdef AUDIO_DIRECT_RING
@@ -62,6 +68,18 @@ extern PlaydateAPI *pd;
 #define DIAG_PPU_SPRCACHE "draw"
 #else
 #define DIAG_PPU_SPRCACHE "all"
+#endif
+
+#ifdef PPU_FAST_OAMDMA
+#define DIAG_PPU_OAMDMA "fast"
+#else
+#define DIAG_PPU_OAMDMA "byte"
+#endif
+
+#ifdef NES_FIXED_SCANLINE_CYCLES
+#define DIAG_CYCLE_ACCUM "fixed3"
+#else
+#define DIAG_CYCLE_ACCUM "float"
 #endif
 
 #ifdef ALIGN_PRG_ROM
@@ -151,6 +169,7 @@ extern PlaydateAPI *pd;
 #endif
 
 static uint32_t window_start  = 0;
+#ifndef DIAG_FPS_ONLY
 static uint32_t render_start  = 0;
 #ifdef DIAG_CPU_EXEC_TIMING
 static uint32_t cpu_exec_start = 0;
@@ -167,6 +186,7 @@ static uint32_t ppu_exec_accum = 0;
 static int      cpu_count     = 0;
 static int      ppu_count     = 0;
 static bool     current_draw  = false;
+#endif
 static int      idx           = 0;
 static int      total         = 0;
 static bool     initialized   = false;
@@ -241,6 +261,7 @@ void diag_set_ppu_sprites_enabled(bool enabled) {
 void diag_frame_begin(void) {
     if (!initialized) {
         pd->system->logToConsole("[diag] build=" BUILD_TIMESTAMP
+                                 " diag=" DIAG_MODE
                                  " audio=" DIAG_AUDIO
                                  " audio_fill=" DIAG_AUDIO_FILL
                                  " bg=" DIAG_BG
@@ -250,6 +271,8 @@ void diag_frame_begin(void) {
                                  " lcd_dirty=" DIAG_LCD_DIRTY
                                  " ppu_strike=" DIAG_PPU_STRIKE
                                  " sprcache=" DIAG_PPU_SPRCACHE
+                                 " oamdma=" DIAG_PPU_OAMDMA
+                                 " cycleacc=" DIAG_CYCLE_ACCUM
                                  " cpu_batch=" DIAG_STRINGIFY(NES_CPU_BATCH_SCANLINES)
                                  " cpu_opt=" NES6502_OPT_LEVEL_LABEL
                                  " cpu_loop_align=" DIAG_CPU_LOOP_ALIGN
@@ -272,24 +295,33 @@ void diag_frame_begin(void) {
 }
 
 void diag_render_begin(bool draw_flag) {
+#ifdef DIAG_FPS_ONLY
+    (void) draw_flag;
+#else
     current_draw = draw_flag;
 #ifdef DIAG_CPU_EXEC_TIMING
     frame_cpu_exec = 0;
 #endif
     render_start = pd->system->getCurrentTimeMilliseconds();
+#endif
 }
 
 #ifdef DIAG_CPU_EXEC_TIMING
 void diag_cpu_execute_begin(void) {
+#ifndef DIAG_FPS_ONLY
     cpu_exec_start = pd->system->getCurrentTimeMilliseconds();
+#endif
 }
 
 void diag_cpu_execute_end(void) {
+#ifndef DIAG_FPS_ONLY
     frame_cpu_exec += pd->system->getCurrentTimeMilliseconds() - cpu_exec_start;
+#endif
 }
 #endif
 
 void diag_render_end(void) {
+#ifndef DIAG_FPS_ONLY
     uint32_t dt = pd->system->getCurrentTimeMilliseconds() - render_start;
     render_accum += dt;
     if (current_draw) {
@@ -305,6 +337,7 @@ void diag_render_end(void) {
 #endif
         cpu_count++;
     }
+#endif
 }
 
 void diag_frame_end(void) {
@@ -320,16 +353,23 @@ void diag_frame_end(void) {
 
     if (window_ms == 0) {
         pd->system->logToConsole("[diag] frame=%-5d fps=>1000", total);
+#ifndef DIAG_FPS_ONLY
         render_accum = cpu_accum = ppu_accum = 0;
 #ifdef DIAG_CPU_EXEC_TIMING
         cpu_exec_accum = ppu_exec_accum = 0;
 #endif
         cpu_count = ppu_count = 0;
+#endif
         return;
     }
 
     uint32_t fps      = (WINDOW * 1000) / window_ms;
     uint32_t avg_ms   = window_ms / WINDOW;
+#ifdef DIAG_FPS_ONLY
+    pd->system->logToConsole(
+        "[diag] frame=%-5d  fps=%3d  avg=%2dms",
+        total, fps, avg_ms);
+#else
     uint32_t avg_cpu  = cpu_count  ? cpu_accum  / cpu_count  : 0;
     uint32_t avg_ppu  = ppu_count  ? ppu_accum  / ppu_count  : 0;
 #ifdef DIAG_CPU_EXEC_TIMING
@@ -345,16 +385,19 @@ void diag_frame_end(void) {
         "[diag] frame=%-5d  fps=%3d  avg=%2dms  cpu_only=%2dms  ppu_full=%2dms",
         total, fps, avg_ms, avg_cpu, avg_ppu);
 #endif
+#endif
 
 #ifdef NES6502_OPPROFILE
     diag_log_opcode_profile();
 #endif
 
+#ifndef DIAG_FPS_ONLY
     render_accum = cpu_accum = ppu_accum = 0;
 #ifdef DIAG_CPU_EXEC_TIMING
     cpu_exec_accum = ppu_exec_accum = 0;
 #endif
     cpu_count = ppu_count = 0;
+#endif
 }
 
 #endif /* DIAG */

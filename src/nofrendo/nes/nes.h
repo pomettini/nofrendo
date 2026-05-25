@@ -80,7 +80,11 @@ typedef struct nes_s
    int scanline;
 
    /* Timing stuff */
+#ifdef NES_FIXED_SCANLINE_CYCLES
+   int scanline_cycles;
+#else
    float scanline_cycles;
+#endif
    bool autoframeskip;
 
    /* control */

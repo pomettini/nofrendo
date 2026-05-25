@@ -45,7 +45,23 @@
 #define  NES_CLOCK_DIVIDER    12
 //#define  NES_MASTER_CLOCK     21477272.727272727272
 #define  NES_MASTER_CLOCK     (236250000 / 11)
+
+#ifdef NES_FIXED_SCANLINE_CYCLES
+#define  NES_SCANLINE_CYCLES_X3 341
+#define  NES_SCANLINE_CYCLES_INT() (nes.scanline_cycles / 3)
+#define  NES_SCANLINE_CYCLES_ADD_LINE() \
+   do { nes.scanline_cycles += NES_SCANLINE_CYCLES_X3; } while (0)
+#define  NES_SCANLINE_CYCLES_SUB(cycles_) \
+   do { nes.scanline_cycles -= (int) (cycles_) * 3; } while (0)
+#else
 #define  NES_SCANLINE_CYCLES  (1364.0 / NES_CLOCK_DIVIDER)
+#define  NES_SCANLINE_CYCLES_INT() ((int) nes.scanline_cycles)
+#define  NES_SCANLINE_CYCLES_ADD_LINE() \
+   do { nes.scanline_cycles += (float) NES_SCANLINE_CYCLES; } while (0)
+#define  NES_SCANLINE_CYCLES_SUB(cycles_) \
+   do { nes.scanline_cycles -= (float) (cycles_); } while (0)
+#endif
+
 #define  NES_FIQ_PERIOD       (NES_MASTER_CLOCK / NES_CLOCK_DIVIDER / 60)
 
 #ifndef NES_CPU_BATCH_SCANLINES
@@ -351,8 +367,8 @@ void nes_renderframe(bool draw_flag)
       /* Visible-line work must finish before vblank raises its status bit. */
       if (241 == nes.scanline && pending_cpu_lines)
       {
-         EXECUTE_CPU_TIMED(nes.scanline_cycles);
-         nes.scanline_cycles -= (float) elapsed_cycles;
+         EXECUTE_CPU_TIMED(NES_SCANLINE_CYCLES_INT());
+         NES_SCANLINE_CYCLES_SUB(elapsed_cycles);
          nes_checkfiq(elapsed_cycles);
          pending_cpu_lines = 0;
       }
@@ -364,7 +380,7 @@ void nes_renderframe(bool draw_flag)
       {
          /* 7-9 cycle delay between when VINT flag goes up and NMI is taken */
          EXECUTE_CPU_TIMED(7);
-         nes.scanline_cycles -= elapsed_cycles;
+         NES_SCANLINE_CYCLES_SUB(elapsed_cycles);
          nes_checkfiq(elapsed_cycles);
 
          ppu_checknmi();
@@ -377,12 +393,12 @@ void nes_renderframe(bool draw_flag)
       if (mapintf->hblank)
          mapintf->hblank(in_vblank);
 
-      nes.scanline_cycles += (float) NES_SCANLINE_CYCLES;
+      NES_SCANLINE_CYCLES_ADD_LINE();
       pending_cpu_lines++;
       if (pending_cpu_lines >= cpu_batch_lines || 241 == nes.scanline)
       {
-         EXECUTE_CPU_TIMED(nes.scanline_cycles);
-         nes.scanline_cycles -= (float) elapsed_cycles;
+         EXECUTE_CPU_TIMED(NES_SCANLINE_CYCLES_INT());
+         NES_SCANLINE_CYCLES_SUB(elapsed_cycles);
          nes_checkfiq(elapsed_cycles);
          pending_cpu_lines = 0;
       }
@@ -393,8 +409,8 @@ void nes_renderframe(bool draw_flag)
 
    if (pending_cpu_lines)
    {
-      EXECUTE_CPU_TIMED(nes.scanline_cycles);
-      nes.scanline_cycles -= (float) elapsed_cycles;
+      EXECUTE_CPU_TIMED(NES_SCANLINE_CYCLES_INT());
+      NES_SCANLINE_CYCLES_SUB(elapsed_cycles);
       nes_checkfiq(elapsed_cycles);
    }
 
