@@ -20,6 +20,9 @@ Always install the current test build as `nofrendo.pdx` on the Playdate. Do not 
 separately named diagnostic copies such as `nofrendo-batchcpu16-...pdx`; keep only one
 on-device copy and let new experiments overwrite it.
 
+The `make _push` helper copies `nofrendo.pdx/.` into the existing device package so it does
+not create a nested `nofrendo.pdx/nofrendo.pdx` folder.
+
 Diagnostic performance builds should be log-only unless the on-screen FPS HUD is explicitly
 needed. With frame skipping enabled, skipped visual frames must not mark the whole LCD dirty;
 otherwise the Playdate still performs a display update on frames where the emulator did not
@@ -83,6 +86,7 @@ Note: use `getFrame()` not `getDisplayBufferBitmap()` — the latter is a read-o
 - [x] `pd->sound->addSource` callback registered in `osd_setsound`
 - [x] Lock-free SPSC ring buffer (4096 × int16); APU output at 22050 Hz, upsampled 2:1 to 44100 Hz
 - [x] `sound_fill_buffer` fills based on elapsed ms so audio tracks wall-clock time regardless of FPS
+- [x] `AUDIO_DIRECT_RING` fills the SPSC ring directly, avoiding an extra temp-buffer copy on the game thread
 
 ### Phase 6 — ROM loading from SD card ✓
 - [x] `osd_getromdata` loads `"cartridge.nes"` from the bundle via `pd->file->stat` + `pd->file->open`

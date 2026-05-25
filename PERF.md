@@ -1086,7 +1086,7 @@ Findings:
 - Promote this as the new baseline: `hudfps=off`, `lcd_dirty=draw`, `cpu_batch=16`,
   `cpu_opt=O3`, all CPU timing hacks off.
 
-### Direct CPU memory-I/O fast path - pending device results
+### Direct CPU memory-I/O fast path - stable, subjective win
 
 This candidate keeps the new display-update baseline and enables `NES6502_DIRECT_MEMIO`.
 
@@ -1112,6 +1112,95 @@ Build target:
 - `make diag-directmem`
 - Expected settings: `hudfps=off`, `lcd_dirty=draw`, `cpu_batch=16`, `cpu_opt=O3`,
   `cpu_memio=direct`, `cpu_rom=page`, `cpu_jmpspin=off`, `cpu_split=off`.
+
+Device result:
+
+| Segment in submitted log | fps | avg | cpu_only | ppu_full |
+|---|---:|---:|---:|---:|
+| Early/light windows, frames 60-780 | 46-50 | 19-21 ms | 6-19 ms | 11-19 ms |
+| Busy mid-level windows, frames 840-1680 | 37-48 | 20-26 ms | 17-24 ms | 18-25 ms |
+| Recovery/tail, frames 1740-2640 | 42-50 | 19-23 ms | 14-20 ms | 16-21 ms |
+
+Findings:
+
+- Stable on hardware; the user reports this plays exceptionally well and close to native NES.
+- Numerically it is not a clean CPU win over the display-update baseline: the worst submitted
+  window is still `fps=37`, `avg=26 ms`, `cpu_only=24 ms`, `ppu_full=25 ms`.
+- Keep it active for the next test because subjective smoothness is best so far, but treat the
+  remaining dips as CPU-interpreter-bound, not display-bound.
+
+### Audio direct ring fill - promoted current baseline
+
+This candidate keeps the directmem/display-update baseline and removes one main-thread audio
+copy in `sound_fill_buffer()`.
+
+What changes:
+
+- The old path asked the APU to fill a stack `tmp[MAX_FILL]` buffer, then copied each sample
+  into the Playdate audio ring one by one.
+- The new path calls the APU directly on the ring's writable contiguous span, with a second
+  APU call only if the write wraps around the end of the ring.
+- `ring_write` is advanced only after each span is filled, so the audio callback never sees
+  partially generated samples.
+
+Why it is worth trying:
+
+- This should reduce non-emulation main-thread work without changing CPU timing, PPU timing,
+  memory mapping, display skipping, or audio wall-clock pacing.
+- It probably will not lower `cpu_only`; if it helps, expect smaller `avg`/felt-smoothness
+  gains rather than a dramatic CPU-side drop.
+
+Build target:
+
+- `make diag-directmem`
+- Expected settings: `audio_fill=direct`, `hudfps=off`, `lcd_dirty=draw`,
+  `cpu_batch=16`, `cpu_opt=O3`, `cpu_memio=direct`, `cpu_rom=page`.
+
+Device result:
+
+| Segment in submitted log | fps | avg | cpu_only | ppu_full |
+|---|---:|---:|---:|---:|
+| Early/light windows, frames 60-840 | 47-50 | 19-21 ms | 6-18 ms | 10-19 ms |
+| Busy mid-level windows, frames 900-1860 | 37-49 | 20-26 ms | 12-24 ms | 15-25 ms |
+| Recovery/tail, frames 1920-2760 | 43-50 | 19-22 ms | 14-20 ms | 16-20 ms |
+
+Findings:
+
+- Stable on hardware and preserves the current best-feeling directmem/display baseline.
+- The light and recovery windows are extremely close to native-speed budget, with many
+  `49-50 fps` windows at `avg=19-20 ms`.
+- The worst submitted window remains CPU-bound: `frame=1860`, `fps=37`, `avg=26 ms`,
+  `cpu_only=24 ms`, `ppu_full=25 ms`.
+- Promote direct ring fill as the current baseline because it removes unnecessary work and
+  does not change emulator timing. The next useful probe should stay inside `nes6502_execute`.
+
+### Fast absolute JMP fetch - pending device results
+
+This candidate keeps the directmem/display/audio baseline and enables
+`NES6502_FAST_JMP_ABS`.
+
+What changes:
+
+- Only opcode `4C` (`JMP $nnnn`) changes.
+- Instead of calling `bank_readword(PC)` for the jump target, it reads the target word from
+  the already-rebased `pc_ptr` when the two operand bytes are contiguous in the current CPU
+  memory bank.
+- If the operand would cross the current 4 KB bank boundary, it falls back to `bank_readword`.
+- It does not fast-forward self-jump loops, widen CPU batches, or change cycle accounting.
+
+Why it is worth trying:
+
+- Mario's opcode profile showed `4C` dominating many diagnostic windows by a very large
+  margin, including the busy windows.
+- The earlier broad hot-op build grew too much code and did not beat the baseline. This keeps
+  the specialization to one tiny path with the best profile signal.
+
+Build target:
+
+- `make diag-fastjmp`
+- Expected settings: `audio_fill=direct`, `hudfps=off`, `lcd_dirty=draw`,
+  `cpu_batch=16`, `cpu_opt=O3`, `cpu_memio=direct`, `cpu_fastjmp=on`,
+  `cpu_rom=page`.
 
 ### Rendered-sprite pattern cache gating - regression
 
@@ -1310,8 +1399,12 @@ Build status on 2026-05-25:
 - The platform-layer display-update skip is the new best baseline. It makes diagnostic
   builds log-only by default (`hudfps=off`) and avoids marking skipped visual frames dirty.
   Mario 1-1 now spends most windows at `49-50 fps`, with remaining dips at `37-45 fps`.
-- Next build to test: direct CPU memory-I/O fast path on top of the new display baseline,
-  expected banner field `cpu_memio=direct`.
+- The direct CPU memory-I/O fast path is stable and subjectively the best device build so far,
+  but the worst busy windows still reach `cpu_only=24 ms`.
+- Direct audio ring fill is stable and promoted as the current baseline; the worst busy
+  window still reaches `cpu_only=24 ms`.
+- Next build to test: fast absolute `JMP` operand fetch on top of the current baseline,
+  expected banner fields `audio_fill=direct`, `cpu_memio=direct`, and `cpu_fastjmp=on`.
 
 ### Background tile CHR cache — only if DTCM becomes available
 
@@ -1322,7 +1415,10 @@ A smaller variant caching only **visible tiles** (~30–40 unique tile indices =
 would reduce D-cache impact significantly. Not yet tried; expected savings small if CHR
 data is already hot from per-frame use.
 
-### FRAME_SKIP arithmetic (reference)
+### FRAME_SKIP arithmetic (historical reference)
+
+This was useful before the `lcd_dirty=draw` fix. It overestimates the present display cost
+because skipped visual frames no longer force a Playdate LCD update.
 
 With cpu_only = 19 ms and ppu_full = 28 ms, average frame time by skip level:
 
@@ -1334,9 +1430,9 @@ With cpu_only = 19 ms and ppu_full = 28 ms, average frame time by skip level:
 | 6 | 20.5 | ~49 | ~8 |
 | 8 | 20.1 | ~50 | ~6 |
 
-**50 fps NES speed requires ≈ FRAME_SKIP=8, which gives ~6 fps visual refresh — unacceptable.**
-The only viable path to 50 fps with good display quality is reducing ppu_full below 22 ms so
-that FRAME_SKIP=2 gives avg ≤ 20 ms. Target: **cut 6 ms from the 8 ms PPU cost.**
+The old conclusion was that 50 fps required unacceptable visual skipping. The display-update
+skip fix invalidated that conclusion: `FRAME_SKIP=2` is now viable in light windows, and the
+remaining slowdowns are CPU-side.
 
 ---
 
@@ -1353,6 +1449,8 @@ make diag-opprofile  # diagnostic build, opcode counter enabled
 make diag-fastpc     # diagnostic build, fast PC operand/branch path enabled
 make diag-faststrike # diagnostic build, batch-32 with immediate sprite-zero hit
 make diag-fastmem    # diagnostic build, RAM mirror fast path enabled
+make diag-directmem  # diagnostic build, direct common memory-I/O fast path enabled
+make diag-fastjmp    # diagnostic build, fast absolute JMP operand fetch enabled
 make diag-jmpspin    # diagnostic build, self-JMP idle-loop fast-forward enabled
 make diag-linearrom  # diagnostic build, contiguous PRG-ROM fast path enabled
 make install-diag-nobg       # build + push as nofrendo.pdx
@@ -1363,6 +1461,8 @@ make install-diag-opprofile  # build + push as nofrendo.pdx
 make install-diag-fastpc     # build + push as nofrendo.pdx
 make install-diag-faststrike # build + push as nofrendo.pdx
 make install-diag-fastmem    # build + push as nofrendo.pdx
+make install-diag-directmem  # build + push as nofrendo.pdx
+make install-diag-fastjmp    # build + push as nofrendo.pdx
 make install-diag-jmpspin    # build + push as nofrendo.pdx
 make install-diag-linearrom  # build + push as nofrendo.pdx
 PORT=/dev/cu.XXX make install   # override auto-detected serial port

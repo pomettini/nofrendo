@@ -67,6 +67,7 @@ endif()
 option(DIAG        "Enable performance diagnostics (logToConsole every 60 frames)" OFF)
 option(DIAG_DRAW_FPS "Draw Playdate's on-screen FPS HUD in diagnostic builds" OFF)
 option(AUDIO       "Enable NES APU" OFF)
+option(AUDIO_DIRECT_RING "Fill the Playdate audio ring directly instead of using a temp buffer" ON)
 option(PPU_BG      "Enable PPU background rendering (OFF to measure cost)" ON)
 option(PPU_SPRITES "Enable PPU sprite rendering (OFF to measure cost)" ON)
 option(PPU_BLIT    "Enable Playdate scanline blit (OFF to measure cost)" ON)
@@ -84,6 +85,7 @@ option(NES6502_FAST_PC_OPS "Use pc_ptr for operand fetches and same-bank branche
 option(NES6502_HOTOPS "Hand-specialize the hottest measured 6502 opcodes" OFF)
 option(NES6502_FAST_MEMIO "Bypass generic memory-handler scans for NES RAM mirror ranges" OFF)
 option(NES6502_DIRECT_MEMIO "Bypass memory-handler scans for common RAM/PPU/APU/input ranges" OFF)
+option(NES6502_FAST_JMP_ABS "Fast-path 6502 JMP absolute operand fetch" OFF)
 option(NES6502_JMP_SPIN "Fast-forward self-JMP idle loops to the end of the CPU slice" OFF)
 option(NES6502_LINEAR_ROM "Fast-path CPU ROM reads when $8000-$FFFF is one contiguous host block" OFF)
 if (AUDIO)
@@ -107,6 +109,7 @@ string(TIMESTAMP BUILD_TIMESTAMP "%Y-%m-%d %H:%M:%S")
 set(GAME_DEFINES
     NDEBUG
     $<$<BOOL:${AUDIO}>:AUDIO=1>
+    $<$<AND:$<BOOL:${AUDIO}>,$<BOOL:${AUDIO_DIRECT_RING}>>:AUDIO_DIRECT_RING=1>
     $<$<BOOL:${DIAG}>:DIAG=1>
     $<$<BOOL:${DIAG_DRAW_FPS}>:DIAG_DRAW_FPS=1>
     $<$<BOOL:${DIAG}>:BUILD_TIMESTAMP="${BUILD_TIMESTAMP}">
@@ -125,6 +128,7 @@ set(GAME_DEFINES
     $<$<BOOL:${NES6502_HOTOPS}>:NES6502_HOTOPS=1>
     $<$<BOOL:${NES6502_FAST_MEMIO}>:NES6502_FAST_MEMIO=1>
     $<$<BOOL:${NES6502_DIRECT_MEMIO}>:NES6502_DIRECT_MEMIO=1>
+    $<$<BOOL:${NES6502_FAST_JMP_ABS}>:NES6502_FAST_JMP_ABS=1>
     $<$<BOOL:${NES6502_JMP_SPIN}>:NES6502_JMP_SPIN=1>
     $<$<BOOL:${NES6502_LINEAR_ROM}>:NES6502_LINEAR_ROM=1>
 )

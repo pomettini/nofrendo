@@ -975,6 +975,18 @@
 }
 #endif
 #else
+#if defined(NES6502_FAST_JMP_ABS) && defined(NES6502_PC_PTR) && defined(HOST_LITTLE_ENDIAN)
+#define JMP_ABSOLUTE() \
+{ \
+   if (__builtin_expect((pc_bank_end - pc_ptr) >= 2, 1)) \
+      temp = (uint32) (*(uint16 *) pc_ptr); \
+   else \
+      temp = bank_readword(PC); \
+   PC = temp; \
+   PC_REBASE(); \
+   ADD_CYCLES(3); \
+}
+#else
 #ifdef NES6502_FAST_PC_OPS
 #define JMP_ABSOLUTE() \
 { \
@@ -989,6 +1001,7 @@
    JUMP(PC); \
    ADD_CYCLES(3); \
 }
+#endif
 #endif
 #endif
 

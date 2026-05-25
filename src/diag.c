@@ -16,8 +16,14 @@ extern PlaydateAPI *pd;
 
 #if AUDIO
 #define DIAG_AUDIO "on"
+#ifdef AUDIO_DIRECT_RING
+#define DIAG_AUDIO_FILL "direct"
+#else
+#define DIAG_AUDIO_FILL "copy"
+#endif
 #else
 #define DIAG_AUDIO "off"
+#define DIAG_AUDIO_FILL "off"
 #endif
 
 #ifdef DISABLE_PPU_BG
@@ -94,6 +100,12 @@ extern PlaydateAPI *pd;
 #define DIAG_CPU_MEMIO "ram"
 #else
 #define DIAG_CPU_MEMIO "table"
+#endif
+
+#ifdef NES6502_FAST_JMP_ABS
+#define DIAG_CPU_FASTJMP "on"
+#else
+#define DIAG_CPU_FASTJMP "off"
 #endif
 
 #ifdef NES6502_JMP_SPIN
@@ -206,6 +218,7 @@ void diag_frame_begin(void) {
     if (!initialized) {
         pd->system->logToConsole("[diag] build=" BUILD_TIMESTAMP
                                  " audio=" DIAG_AUDIO
+                                 " audio_fill=" DIAG_AUDIO_FILL
                                  " bg=" DIAG_BG
                                  " sprites=" DIAG_SPRITES
                                  " blit=" DIAG_BLIT
@@ -220,6 +233,7 @@ void diag_frame_begin(void) {
                                  " cpu_fastpc=" DIAG_CPU_FASTPC
                                  " cpu_hotops=" DIAG_CPU_HOTOPS
                                  " cpu_memio=" DIAG_CPU_MEMIO
+                                 " cpu_fastjmp=" DIAG_CPU_FASTJMP
                                  " cpu_jmpspin=" DIAG_CPU_JMPSPIN
                                  " cpu_rom=" DIAG_CPU_ROM
                                  " cpu_split=" DIAG_CPU_SPLIT

@@ -64,6 +64,22 @@ void sound_fill_buffer(void) {
     if (samples > MAX_FILL) samples = MAX_FILL;
     if (samples <= 0) return;
 
+#ifdef AUDIO_DIRECT_RING
+    unsigned int write = ring_write;
+    int write_index = write & RING_MASK;
+    int first = RING_SIZE - write_index;
+    if (first > samples) first = samples;
+
+    apu_fill(&ring[write_index], first);
+    ring_write = (write + first) & RING_MASK;
+
+    int remaining = samples - first;
+    if (remaining > 0) {
+        write = ring_write;
+        apu_fill(&ring[write & RING_MASK], remaining);
+        ring_write = (write + remaining) & RING_MASK;
+    }
+#else
     int16_t tmp[MAX_FILL];
     apu_fill(tmp, samples);
 
@@ -71,4 +87,5 @@ void sound_fill_buffer(void) {
         ring[ring_write & RING_MASK] = tmp[i];
         ring_write = (ring_write + 1) & RING_MASK;
     }
+#endif
 }
