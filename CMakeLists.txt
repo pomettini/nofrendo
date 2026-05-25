@@ -72,6 +72,7 @@ option(PPU_BG      "Enable PPU background rendering (OFF to measure cost)" ON)
 option(PPU_SPRITES "Enable PPU sprite rendering (OFF to measure cost)" ON)
 option(PPU_BLIT    "Enable Playdate scanline blit (OFF to measure cost)" ON)
 option(PPU_FAST_STRIKE "Return sprite-zero hit as soon as it is detected" OFF)
+option(PPU_SPRITE_CACHE_DRAW_ONLY "Build the sprite render cache only on drawn frames" OFF)
 option(ALIGN_PRG_ROM "Align iNES PRG ROM start for cache experiments" OFF)
 option(DIAG_CPU_EXEC_TIMING "Time every nes6502_execute call in diagnostic builds" OFF)
 set(NES_CPU_BATCH_SCANLINES "1" CACHE STRING
@@ -88,6 +89,7 @@ option(NES6502_DIRECT_MEMIO "Bypass memory-handler scans for common RAM/PPU/APU/
 option(NES6502_FAST_JMP_ABS "Fast-path 6502 JMP absolute operand fetch" OFF)
 option(NES6502_FAST_BRANCHES "Fast-path taken relative branches with pc_ptr" OFF)
 option(NES6502_FAST_OPERAND_BYTES "Use pc_ptr for one-byte 6502 operand fetches" OFF)
+option(NES6502_FAST_MEMOPS "Hand-specialize hot 6502 memory load/store opcodes" OFF)
 option(NES6502_JMP_SPIN "Fast-forward self-JMP idle loops to the end of the CPU slice" OFF)
 option(NES6502_LINEAR_ROM "Fast-path CPU ROM reads when $8000-$FFFF is one contiguous host block" OFF)
 if (AUDIO)
@@ -119,6 +121,7 @@ set(GAME_DEFINES
     $<$<NOT:$<BOOL:${PPU_SPRITES}>>:DISABLE_PPU_SPRITES=1>
     $<$<NOT:$<BOOL:${PPU_BLIT}>>:DISABLE_PPU_BLIT=1>
     $<$<BOOL:${PPU_FAST_STRIKE}>:PPU_FAST_STRIKE=1>
+    $<$<BOOL:${PPU_SPRITE_CACHE_DRAW_ONLY}>:PPU_SPRITE_CACHE_DRAW_ONLY=1>
     $<$<BOOL:${ALIGN_PRG_ROM}>:ALIGN_PRG_ROM=1>
     $<$<BOOL:${DIAG_CPU_EXEC_TIMING}>:DIAG_CPU_EXEC_TIMING=1>
     NES_CPU_BATCH_SCANLINES=${NES_CPU_BATCH_SCANLINES}
@@ -133,6 +136,7 @@ set(GAME_DEFINES
     $<$<BOOL:${NES6502_FAST_JMP_ABS}>:NES6502_FAST_JMP_ABS=1>
     $<$<BOOL:${NES6502_FAST_BRANCHES}>:NES6502_FAST_BRANCHES=1>
     $<$<BOOL:${NES6502_FAST_OPERAND_BYTES}>:NES6502_FAST_OPERAND_BYTES=1>
+    $<$<BOOL:${NES6502_FAST_MEMOPS}>:NES6502_FAST_MEMOPS=1>
     $<$<BOOL:${NES6502_JMP_SPIN}>:NES6502_JMP_SPIN=1>
     $<$<BOOL:${NES6502_LINEAR_ROM}>:NES6502_LINEAR_ROM=1>
 )

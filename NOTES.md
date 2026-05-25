@@ -33,6 +33,14 @@ The runtime Playdate menu should not expose background/sprite render toggles. Th
 skew. Use compile-time targets such as `diag-nobg` or `diag-nosprites` only when measuring
 those rows.
 
+Current promoted speed line after the 2026-05-25 Mario 1-1 tests is direct audio fill,
+display dirty-on-draw, direct CPU memory I/O, and safe fast absolute-JMP fetch. Fast branch
+and broad one-byte operand fetches were safe but mixed, so keep them off unless retesting.
+The narrow `diag-fastmemops` load/store specialization was also mixed and is not promoted.
+The `diag-fastbatch` batch-24 timing probe was also mixed and is not promoted. The next
+probe is `diag-skipcache`, which keeps the clean batch-16 directmem/fastjmp line and skips
+the render-only sprite-cache rebuild on skipped visual frames.
+
 ## What's here
 
 `src/nofrendo/` — upstream Nofrendo emulator core, unchanged. Keep it that way; all platform work goes in `src/`.

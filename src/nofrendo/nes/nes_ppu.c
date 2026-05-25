@@ -1119,7 +1119,14 @@ void ppu_scanline(uint8_t *bmp, int scanline, bool draw_flag)
    {
       /* Rebuild caches once per frame at scanline 0 */
       if (0 == scanline)
+      {
+#ifdef PPU_SPRITE_CACHE_DRAW_ONLY
+         if (draw_flag)
+            ppu_build_sprite_cache();
+#else
          ppu_build_sprite_cache();
+#endif
+      }
 
       /* Lower the Max Sprite per scanline flag */
       ppu.stat &= ~PPU_STATF_MAXSPRITE;

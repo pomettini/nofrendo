@@ -1317,6 +1317,147 @@ Finding:
 - The next clean baseline should disable `cpu_fastbranch` and `cpu_fastopbyte`, keep
   direct memory I/O and the safe fast absolute-JMP path, and remove runtime render toggles.
 
+### Clean directmem/fastjmp baseline, render toggles removed - current promoted line
+
+This is the clean row after removing the runtime `Draw BG` and `Draw Sprites` menu
+checkmarks. It keeps direct audio fill, display-update skip, direct CPU memory I/O, and
+the safe absolute-JMP operand fetch.
+
+Device row:
+
+- Build: `2026-05-25 13:02:33`
+- Settings: `audio_fill=direct`, `lcd_dirty=draw`, `cpu_memio=direct`,
+  `cpu_fastjmp=on`, `cpu_fastbranch=off`, `cpu_fastopbyte=off`, `cpu_rom=page`.
+
+| Segment in submitted log | fps | avg | cpu_only | ppu_full |
+|---|---:|---:|---:|---:|
+| Early/light windows, frames 60-840 | 47-50 | 19-21 ms | 6-19 ms | 10-18 ms |
+| Busy mid-level windows, frames 900-1740 | 35-49 | 20-27 ms | 17-25 ms | 17-25 ms |
+| Recovery/tail, frames 1800-2580 | 41-50 | 20-23 ms | 14-22 ms | 15-21 ms |
+
+Finding:
+
+- This remains the best-behaved line: most Mario 1-1 windows now sit at `47-50 fps`.
+- Removing the render toggles did not change the bottleneck shape; the worst sections are
+  still CPU-bound, with a peak `cpu_only=25 ms` around frame 1680.
+- Next probe: keep branch behavior and broad operand fetching unchanged, and only inline
+  the measured hot memory load/store opcodes on top of this line.
+
+### Fast hot memory opcodes - mixed / not promoted
+
+This candidate adds `NES6502_FAST_MEMOPS` on top of the clean directmem/fastjmp baseline.
+It is narrower than the earlier `NES6502_HOTOPS` row.
+
+What changes:
+
+- Inline `STA $nn`, `STA $nnnn`, `STA $nnnn,Y`, `LDA $nn`, `LDA $nnnn`, and
+  `LDA $nnnn,X`.
+- These opcodes use direct `pc_ptr` operand fetches and inline RAM/ROM fast paths when the
+  address class is known.
+- It deliberately leaves `cpu_fastbranch=off` and `cpu_fastopbyte=off`, because both were
+  safe but mixed.
+
+Build target:
+
+- `make diag-fastmemops`
+- Expected settings: `audio_fill=direct`, `hudfps=off`, `lcd_dirty=draw`,
+  `cpu_batch=16`, `cpu_opt=O3`, `cpu_memio=direct`, `cpu_fastjmp=on`,
+  `cpu_fastbranch=off`, `cpu_fastopbyte=off`, `cpu_fastmemops=on`, `cpu_rom=page`.
+
+Device row:
+
+- Build: `2026-05-25 13:22:17`
+- Settings: `audio_fill=direct`, `lcd_dirty=draw`, `cpu_memio=direct`,
+  `cpu_fastjmp=on`, `cpu_fastmemops=on`, `cpu_rom=page`.
+
+| Segment in submitted log | fps | avg | cpu_only | ppu_full |
+|---|---:|---:|---:|---:|
+| Early/light windows, frames 60-840 | 45-50 | 19-21 ms | 6-19 ms | 10-20 ms |
+| Busy mid-level windows, frames 900-1620 | 35-49 | 20-28 ms | 16-25 ms | 18-26 ms |
+| Recovery/tail, frames 1680-2520 | 41-50 | 19-24 ms | 14-22 ms | 16-22 ms |
+
+Finding:
+
+- Safe in the submitted Mario row, but not a net win over the clean directmem/fastjmp
+  baseline.
+- The stubborn busy stretch still reaches `cpu_only=25 ms`, and several comparable
+  windows are worse than the `cpu_fastmemops=off` row.
+- Do not promote `NES6502_FAST_MEMOPS`; keep it as an available probe only.
+
+### Batch 24 on directmem/fastjmp - mixed / not promoted
+
+This timing probe keeps the current promoted CPU/data-path line and raises the no-hblank
+CPU batch width from 16 to 24 scanlines.
+
+Why it is worth one test:
+
+- The remaining bad windows are CPU-bound, and opcode-level specialization is now mostly
+  trading I-cache/code-shape costs against small local wins.
+- `cpu_batch=32` was rejected because Mario played in slow motion, but `cpu_batch=16`
+  is very close to the 20 ms budget. `24` is a middle value that may reduce interpreter
+  entry overhead without pushing PPU/CPU timing as far apart as 32.
+
+Risk:
+
+- Treat this as speed-first and provisional. If Mario feels slow-motion again, reject it
+  even if the numeric fps row looks better.
+
+Build target:
+
+- `make diag-fastbatch`
+- Expected settings: `audio_fill=direct`, `hudfps=off`, `lcd_dirty=draw`,
+  `cpu_batch=24`, `cpu_opt=O3`, `cpu_memio=direct`, `cpu_fastjmp=on`,
+  `cpu_fastmemops=off`, `cpu_rom=page`.
+- Built and installed over the single device `Games/nofrendo.pdx` on 2026-05-25.
+  Expected device banner timestamp: `build=2026-05-25 13:29:41`.
+
+Device row:
+
+| Segment in submitted log | fps | avg | cpu_only | ppu_full |
+|---|---:|---:|---:|---:|
+| Early/light windows, frames 60-840 | 44-50 | 19-22 ms | 6-20 ms | 10-19 ms |
+| Busy mid-level windows, frames 900-1620 | 36-48 | 20-27 ms | 17-25 ms | 17-25 ms |
+| Recovery/tail, frames 1680-2400 | 43-50 | 19-22 ms | 14-20 ms | 15-20 ms |
+
+Finding:
+
+- Not a breakthrough. It remains safe-looking in the submitted log, but the same busy
+  stretch still reaches `cpu_only=25 ms`.
+- Do not promote `cpu_batch=24`; the timing risk is not buying enough over the cleaner
+  batch-16 row.
+
+### Sprite render cache only on drawn frames - pending device results
+
+This probe keeps the clean `cpu_batch=16` directmem/fastjmp baseline and avoids rebuilding
+the sprite render cache on skipped visual frames.
+
+What changes:
+
+- `FRAME_SKIP=2` already means every other NES frame runs with `draw_flag=false`.
+- Skipped frames still need `ppu_fakeoam()` for sprite-zero status, but they never call
+  `ppu_renderoam()` and therefore never read `oam_sl_count`, `oam_sl_idx`, `oam_pat1`, or
+  `oam_pat2`.
+- With `PPU_SPRITE_CACHE_DRAW_ONLY=ON`, `ppu_build_sprite_cache()` runs at scanline 0 only
+  for drawn frames. The next drawn frame rebuilds the cache before rendering, so there is
+  no stale sprite-cache dependency.
+
+Why it is worth testing:
+
+- This removes pure PPU bookkeeping from the `cpu_only` frames that define the remaining
+  slowdowns.
+- Unlike the earlier sprite-cache gating regression, this does not add per-sprite
+  conditionals or change cache layout on drawn frames; it simply skips work that cannot be
+  consumed on skipped frames.
+
+Build target:
+
+- `make diag-skipcache`
+- Expected settings: `audio_fill=direct`, `hudfps=off`, `lcd_dirty=draw`,
+  `ppu_strike=cycle`, `sprcache=draw`, `cpu_batch=16`, `cpu_opt=O3`,
+  `cpu_memio=direct`, `cpu_fastjmp=on`, `cpu_rom=page`.
+- Built and installed over the single device `Games/nofrendo.pdx` on 2026-05-25.
+  Expected device banner timestamp: `build=2026-05-25 13:40:05`.
+
 ### Rendered-sprite pattern cache gating - regression
 
 This small PPU-side probe targeted the enemy-heavy dips without changing CPU timing.
@@ -1520,6 +1661,19 @@ Build status on 2026-05-25:
   window still reaches `cpu_only=24 ms`.
 - Next build to test: fast absolute `JMP` operand fetch on top of the current baseline,
   expected banner fields `audio_fill=direct`, `cpu_memio=direct`, and `cpu_fastjmp=on`.
+- Fast absolute `JMP` stayed safe and was kept. Fast branch and fast one-byte operand
+  fetches were tested but not promoted. The clean promoted line is now directmem +
+  fastjmp with runtime BG/sprite menu toggles removed.
+- Latest clean row (`build=2026-05-25 13:02:33`) is near-native for most of Mario 1-1,
+  but still peaks at `cpu_only=25 ms` in the busy mid-level band. The next probe is
+  `NES6502_FAST_MEMOPS`, a narrow hot load/store specialization on top of that line.
+- `NES6502_FAST_MEMOPS` was tested and rejected as mixed: it stayed safe, but the busy
+  mid-level band still reached `cpu_only=25 ms` and several comparable windows got worse.
+  The next probe is `diag-fastbatch`, a middle-ground `cpu_batch=24` timing row on the
+  clean directmem/fastjmp baseline. Reject it immediately if Mario feels slow-motion.
+- `diag-fastbatch` was tested and also rejected as mixed. It still reached `cpu_only=25 ms`
+  in the busy mid-level band. The next probe is `diag-skipcache`, which keeps batch 16 and
+  skips render-only sprite-cache construction on skipped visual frames.
 
 ### Background tile CHR cache — only if DTCM becomes available
 
@@ -1568,6 +1722,9 @@ make diag-directmem  # diagnostic build, direct common memory-I/O fast path enab
 make diag-fastjmp    # diagnostic build, fast absolute JMP operand fetch enabled
 make diag-fastbranch # diagnostic build, fast taken relative branches enabled
 make diag-fastopbyte # diagnostic build, fast one-byte operand fetch enabled
+make diag-fastmemops # diagnostic build, hot memory load/store opcodes specialized
+make diag-fastbatch  # diagnostic build, directmem/fastjmp with FASTBATCH scanline batches
+make diag-skipcache  # diagnostic build, skip sprite render-cache rebuilds on skipped frames
 make diag-jmpspin    # diagnostic build, self-JMP idle-loop fast-forward enabled
 make diag-linearrom  # diagnostic build, contiguous PRG-ROM fast path enabled
 make install-diag-nobg       # build + push as nofrendo.pdx
@@ -1582,6 +1739,9 @@ make install-diag-directmem  # build + push as nofrendo.pdx
 make install-diag-fastjmp    # build + push as nofrendo.pdx
 make install-diag-fastbranch # build + push as nofrendo.pdx
 make install-diag-fastopbyte # build + push as nofrendo.pdx
+make install-diag-fastmemops # build + push as nofrendo.pdx
+make install-diag-fastbatch  # build + push as nofrendo.pdx
+make install-diag-skipcache  # build + push as nofrendo.pdx
 make install-diag-jmpspin    # build + push as nofrendo.pdx
 make install-diag-linearrom  # build + push as nofrendo.pdx
 PORT=/dev/cu.XXX make install   # override auto-detected serial port

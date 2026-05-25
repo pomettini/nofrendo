@@ -58,6 +58,12 @@ extern PlaydateAPI *pd;
 #define DIAG_PPU_STRIKE "cycle"
 #endif
 
+#ifdef PPU_SPRITE_CACHE_DRAW_ONLY
+#define DIAG_PPU_SPRCACHE "draw"
+#else
+#define DIAG_PPU_SPRCACHE "all"
+#endif
+
 #ifdef ALIGN_PRG_ROM
 #define DIAG_PRG_ALIGN "16k"
 #else
@@ -118,6 +124,12 @@ extern PlaydateAPI *pd;
 #define DIAG_CPU_FASTOPBYTE "on"
 #else
 #define DIAG_CPU_FASTOPBYTE "off"
+#endif
+
+#ifdef NES6502_FAST_MEMOPS
+#define DIAG_CPU_FASTMEMOPS "on"
+#else
+#define DIAG_CPU_FASTMEMOPS "off"
 #endif
 
 #ifdef NES6502_JMP_SPIN
@@ -237,6 +249,7 @@ void diag_frame_begin(void) {
                                  " hudfps=" DIAG_HUD_FPS
                                  " lcd_dirty=" DIAG_LCD_DIRTY
                                  " ppu_strike=" DIAG_PPU_STRIKE
+                                 " sprcache=" DIAG_PPU_SPRCACHE
                                  " cpu_batch=" DIAG_STRINGIFY(NES_CPU_BATCH_SCANLINES)
                                  " cpu_opt=" NES6502_OPT_LEVEL_LABEL
                                  " cpu_loop_align=" DIAG_CPU_LOOP_ALIGN
@@ -248,6 +261,7 @@ void diag_frame_begin(void) {
                                  " cpu_fastjmp=" DIAG_CPU_FASTJMP
                                  " cpu_fastbranch=" DIAG_CPU_FASTBRANCH
                                  " cpu_fastopbyte=" DIAG_CPU_FASTOPBYTE
+                                 " cpu_fastmemops=" DIAG_CPU_FASTMEMOPS
                                  " cpu_jmpspin=" DIAG_CPU_JMPSPIN
                                  " cpu_rom=" DIAG_CPU_ROM
                                  " cpu_split=" DIAG_CPU_SPLIT

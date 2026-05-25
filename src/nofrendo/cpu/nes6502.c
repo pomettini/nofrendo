@@ -2514,7 +2514,7 @@ int nes6502_execute(int timeslice_cycles)
          OPCODE_END
 
       OPCODE_BEGIN(85)  /* STA $nn */
-#ifdef NES6502_HOTOPS
+#if defined(NES6502_HOTOPS) || defined(NES6502_FAST_MEMOPS)
          FETCH_PC_BYTE_DIRECT(baddr);
          ZP_WRITEBYTE(baddr, A);
          ADD_CYCLES(3);
@@ -2548,7 +2548,7 @@ int nes6502_execute(int timeslice_cycles)
          OPCODE_END
 
       OPCODE_BEGIN(8D)  /* STA $nnnn */
-#ifdef NES6502_HOTOPS
+#if defined(NES6502_HOTOPS) || defined(NES6502_FAST_MEMOPS)
          FETCH_PC_WORD_DIRECT(addr);
          WRITE_FAST_BYTE(addr, A);
          ADD_CYCLES(4);
@@ -2598,7 +2598,7 @@ int nes6502_execute(int timeslice_cycles)
          OPCODE_END
 
       OPCODE_BEGIN(99)  /* STA $nnnn,Y */
-#ifdef NES6502_HOTOPS
+#if defined(NES6502_HOTOPS) || defined(NES6502_FAST_MEMOPS)
          FETCH_PC_WORD_DIRECT(addr);
          addr = (addr + Y) & 0xFFFF;
          WRITE_FAST_BYTE(addr, A);
@@ -2653,7 +2653,7 @@ int nes6502_execute(int timeslice_cycles)
          OPCODE_END
 
       OPCODE_BEGIN(A5)  /* LDA $nn */
-#ifdef NES6502_HOTOPS
+#if defined(NES6502_HOTOPS) || defined(NES6502_FAST_MEMOPS)
          FETCH_PC_BYTE_DIRECT(baddr);
          A = ZP_READBYTE(baddr);
          SET_NZ_FLAGS(A);
@@ -2692,7 +2692,7 @@ int nes6502_execute(int timeslice_cycles)
          OPCODE_END
 
       OPCODE_BEGIN(AD)  /* LDA $nnnn */
-#ifdef NES6502_HOTOPS
+#if defined(NES6502_HOTOPS) || defined(NES6502_FAST_MEMOPS)
          FETCH_PC_WORD_DIRECT(addr);
          READ_FAST_BYTE(addr, A);
          SET_NZ_FLAGS(A);
@@ -2759,7 +2759,7 @@ int nes6502_execute(int timeslice_cycles)
          OPCODE_END
 
       OPCODE_BEGIN(BD)  /* LDA $nnnn,X */
-#ifdef NES6502_HOTOPS
+#if defined(NES6502_HOTOPS) || defined(NES6502_FAST_MEMOPS)
          FETCH_PC_WORD_DIRECT(addr);
          addr = (addr + X) & 0xFFFF;
          PAGE_CROSS_CHECK(addr, X);
