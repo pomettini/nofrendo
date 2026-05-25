@@ -219,9 +219,10 @@ The first matrix pass is ready for device logs:
 - `diag-nobg`, `diag-nosprites`, `diag-noblit`, and `diag-noaudio` all build locally.
 - Dedicated install targets now build the requested variant and overwrite the single
   on-device `nofrendo.pdx`. Do not create separately named PDX copies for new tests.
-- The normal diagnostic build also exposes Playdate menu checkmarks for `Draw BG` and
-  `Draw Sprites`. Reach the scene first, change a checkmark, and capture the following
-  `[diag] runtime bg=... sprites=...` marker with the log window.
+- The normal diagnostic build no longer exposes runtime BG/sprite render checkmarks. The
+  old `Draw BG` and `Draw Sprites` toggles were removed on 2026-05-25 because they made
+  gameplay tests too easy to skew. Use `diag-nobg` / `diag-nosprites` only for explicit
+  compile-time measurement rows.
 - `nofrendo-noaudio.pdx` was copied to the connected Playdate as the first handoff row.
 
 Use runtime menu cuts for same-scene exploratory logs. Keep the compile-time variants for
@@ -289,8 +290,8 @@ Findings:
 - The submitted background-off build was not a playable diagnostic view: it showed stale
   horizontal glitch lines, so this row is useful for cost attribution only.
 - The diagnostic BG-disabled path now clears each drawn scanline instead of reusing stale
-  pixels. Verify that on device; the normal diagnostic build can also reach a scene first
-  and then disable `Draw BG` from the Playdate menu.
+  pixels. Verify BG-off rows with the compile-time `diag-nobg` build; the runtime `Draw BG`
+  menu toggle was later removed because it polluted real gameplay tests.
 - With audio on and sprites still enabled, the steady `ppu_full - cpu_only` cost drops to
   about 4 ms. Compared with the earlier normal audio-on idle delta of about 8 ms, this
   points to background pixel rendering costing roughly 4 ms in that comparison.
@@ -1174,7 +1175,7 @@ Findings:
 - Promote direct ring fill as the current baseline because it removes unnecessary work and
   does not change emulator timing. The next useful probe should stay inside `nes6502_execute`.
 
-### Fast absolute JMP fetch - pending device results
+### Fast absolute JMP fetch - safe, very small / mixed win
 
 This candidate keeps the directmem/display/audio baseline and enables
 `NES6502_FAST_JMP_ABS`.
@@ -1201,6 +1202,120 @@ Build target:
 - Expected settings: `audio_fill=direct`, `hudfps=off`, `lcd_dirty=draw`,
   `cpu_batch=16`, `cpu_opt=O3`, `cpu_memio=direct`, `cpu_fastjmp=on`,
   `cpu_rom=page`.
+
+Device row:
+
+- Build: `2026-05-25 01:57:26`
+- Settings: `audio_fill=direct`, `lcd_dirty=draw`, `cpu_memio=direct`,
+  `cpu_fastjmp=on`, `cpu_rom=page`.
+
+| Segment in submitted log | fps | avg | cpu_only | ppu_full |
+|---|---:|---:|---:|---:|
+| Early/light windows, frames 60-840 | 48-50 | 19-20 ms | 6-18 ms | 10-19 ms |
+| Busy mid-level windows, frames 900-1800 | 36-48 | 20-27 ms | 12-24 ms | 14-25 ms |
+| Recovery/tail, frames 1860-2700 | 42-50 | 19-23 ms | 14-21 ms | 15-21 ms |
+
+Finding:
+
+- No obvious correctness regression in the submitted log.
+- Performance is close to the directmem/audio-direct baseline. Some windows move a little
+  better, but the worst busy windows still hit `cpu_only=21-24 ms`.
+- Keep the option available, but do not treat this alone as the breakthrough.
+
+### Fast taken relative branches - mixed / not promoted
+
+This candidate keeps the directmem/display/audio baseline, keeps the safe `JMP $nnnn`
+operand fast path enabled, and adds `NES6502_FAST_BRANCHES`.
+
+What changes:
+
+- All relative branches (`BNE`, `BEQ`, `BPL`, etc.) use `pc_ptr` for the offset byte.
+- Taken branches avoid `PC_REBASE()` when the target stays inside the same 4 KB CPU
+  memory bank; they just adjust `pc_ptr` by the signed branch offset.
+- Cycle accounting stays unchanged, including the existing 6502 page-cross penalty.
+
+Why it is worth trying:
+
+- The opcode profile showed `D0` (`BNE`) and `F0` (`BEQ`) among the dominant non-`JMP`
+  opcodes in busy Mario windows.
+- This is narrower than `NES6502_FAST_PC_OPS` and much narrower than `NES6502_HOTOPS`,
+  so it should avoid most of the code-size/cache regression risk from the earlier broad
+  opcode-specialization build.
+
+Build target:
+
+- `make diag-fastbranch`
+- Expected settings: `audio_fill=direct`, `hudfps=off`, `lcd_dirty=draw`,
+  `cpu_batch=16`, `cpu_opt=O3`, `cpu_memio=direct`, `cpu_fastjmp=on`,
+  `cpu_fastbranch=on`, `cpu_rom=page`.
+
+Device row:
+
+- Build: `2026-05-25 12:38:56`
+- Settings: `audio_fill=direct`, `cpu_memio=direct`, `cpu_fastjmp=on`,
+  `cpu_fastbranch=on`, `cpu_rom=page`.
+
+| Segment in submitted log | fps | avg | cpu_only | ppu_full |
+|---|---:|---:|---:|---:|
+| Early/light windows, frames 60-840 | 47-50 | 19-21 ms | 6-19 ms | 11-19 ms |
+| Busy mid-level windows, frames 900-1740 | 38-48 | 20-26 ms | 17-24 ms | 18-24 ms |
+| Recovery/tail, frames 1800-2640 | 42-50 | 19-23 ms | 15-21 ms | 16-21 ms |
+
+Finding:
+
+- Safe in the submitted log, but not a clear win over the directmem/audio-direct baseline.
+- The remaining bad windows are still CPU-bound, with `cpu_only=21-24 ms`.
+- Do not promote `NES6502_FAST_BRANCHES` yet; the next probe keeps it off and targets only
+  one-byte operand fetches.
+
+### Fast one-byte operand fetch - mixed / not promoted
+
+This candidate keeps the directmem/display/audio baseline, keeps the safe absolute-JMP
+operand fast path enabled, removes the runtime BG menu toggle, and adds
+`NES6502_FAST_OPERAND_BYTES`.
+
+What changes:
+
+- Immediate and one-byte addressing operands use `pc_ptr` via `FETCH_PC_BYTE_DIRECT`.
+- This covers immediate ops and zero-page addressing modes, so it targets hot Mario opcodes
+  such as `C9` (`CMP #nn`), `A5` (`LDA $nn`), `85` (`STA $nn`), plus relative branch
+  offset fetches.
+- Unlike `NES6502_FAST_BRANCHES`, taken branches still use the normal target-rebase path.
+- Cycle accounting stays unchanged.
+
+Why it is worth trying:
+
+- The opcode profile showed many busy-window cycles in short-operand instructions after
+  `4C`.
+- This tests one narrow piece of the broader `NES6502_FAST_PC_OPS` idea without also
+  changing absolute-word operands or same-bank branch behavior.
+
+Build target:
+
+- `make diag-fastopbyte`
+- Expected settings: `audio_fill=direct`, `hudfps=off`, `lcd_dirty=draw`,
+  `cpu_batch=16`, `cpu_opt=O3`, `cpu_memio=direct`, `cpu_fastjmp=on`,
+  `cpu_fastbranch=off`, `cpu_fastopbyte=on`, `cpu_rom=page`.
+
+Device row:
+
+- Build: `2026-05-25 12:55:54`
+- Settings: `audio_fill=direct`, `cpu_memio=direct`, `cpu_fastjmp=on`,
+  `cpu_fastbranch=off`, `cpu_fastopbyte=on`, `cpu_rom=page`.
+
+| Segment in submitted log | fps | avg | cpu_only | ppu_full |
+|---|---:|---:|---:|---:|
+| Early/light windows, frames 60-780 | 47-50 | 19-20 ms | 6-18 ms | 10-19 ms |
+| Busy mid-level windows, frames 840-1680 | 36-49 | 20-27 ms | 16-24 ms | 17-25 ms |
+| Recovery/tail, frames 1740-2460 | 43-50 | 19-22 ms | 13-20 ms | 16-21 ms |
+
+Finding:
+
+- Safe in the submitted log, but it does not clearly beat the directmem/audio-direct
+  baseline. Several mid-level windows remain in the `cpu_only=21-24 ms` range.
+- Do not promote `NES6502_FAST_OPERAND_BYTES`.
+- The next clean baseline should disable `cpu_fastbranch` and `cpu_fastopbyte`, keep
+  direct memory I/O and the safe fast absolute-JMP path, and remove runtime render toggles.
 
 ### Rendered-sprite pattern cache gating - regression
 
@@ -1451,6 +1566,8 @@ make diag-faststrike # diagnostic build, batch-32 with immediate sprite-zero hit
 make diag-fastmem    # diagnostic build, RAM mirror fast path enabled
 make diag-directmem  # diagnostic build, direct common memory-I/O fast path enabled
 make diag-fastjmp    # diagnostic build, fast absolute JMP operand fetch enabled
+make diag-fastbranch # diagnostic build, fast taken relative branches enabled
+make diag-fastopbyte # diagnostic build, fast one-byte operand fetch enabled
 make diag-jmpspin    # diagnostic build, self-JMP idle-loop fast-forward enabled
 make diag-linearrom  # diagnostic build, contiguous PRG-ROM fast path enabled
 make install-diag-nobg       # build + push as nofrendo.pdx
@@ -1463,6 +1580,8 @@ make install-diag-faststrike # build + push as nofrendo.pdx
 make install-diag-fastmem    # build + push as nofrendo.pdx
 make install-diag-directmem  # build + push as nofrendo.pdx
 make install-diag-fastjmp    # build + push as nofrendo.pdx
+make install-diag-fastbranch # build + push as nofrendo.pdx
+make install-diag-fastopbyte # build + push as nofrendo.pdx
 make install-diag-jmpspin    # build + push as nofrendo.pdx
 make install-diag-linearrom  # build + push as nofrendo.pdx
 PORT=/dev/cu.XXX make install   # override auto-detected serial port

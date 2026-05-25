@@ -2,7 +2,6 @@
 #include <osd.h>
 #include <event.h>
 #include <nesinput.h>
-#include "diag.h"
 
 extern PlaydateAPI *pd;
 
@@ -33,37 +32,9 @@ static bool select_pending = false;
 static void menu_start(void *ud)  { start_pending  = true; fire(event_joypad1_start,  INP_STATE_MAKE); }
 static void menu_select(void *ud) { select_pending = true; fire(event_joypad1_select, INP_STATE_MAKE); }
 
-#ifdef DIAG
-#ifndef DISABLE_PPU_BG
-static PDMenuItem *draw_bg_item = NULL;
-static void menu_draw_bg(void *ud) {
-    (void)ud;
-    diag_set_ppu_bg_enabled(pd->system->getMenuItemValue(draw_bg_item) != 0);
-}
-#endif
-
-#ifndef DISABLE_PPU_SPRITES
-static PDMenuItem *draw_sprites_item = NULL;
-static void menu_draw_sprites(void *ud) {
-    (void)ud;
-    diag_set_ppu_sprites_enabled(pd->system->getMenuItemValue(draw_sprites_item) != 0);
-}
-#endif
-#endif
-
 void osd_input_init(void) {
     pd->system->addMenuItem("Start",  menu_start,  NULL);
     pd->system->addMenuItem("Select", menu_select, NULL);
-
-#ifdef DIAG
-#ifndef DISABLE_PPU_BG
-    draw_bg_item = pd->system->addCheckmarkMenuItem("Draw BG", 1, menu_draw_bg, NULL);
-#endif
-#ifndef DISABLE_PPU_SPRITES
-    draw_sprites_item = pd->system->addCheckmarkMenuItem("Draw Sprites", 1,
-                                                         menu_draw_sprites, NULL);
-#endif
-#endif
 }
 
 void osd_getinput(void) {

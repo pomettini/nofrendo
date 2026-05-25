@@ -28,6 +28,11 @@ needed. With frame skipping enabled, skipped visual frames must not mark the who
 otherwise the Playdate still performs a display update on frames where the emulator did not
 draw anything.
 
+The runtime Playdate menu should not expose background/sprite render toggles. The old
+`Draw BG` and `Draw Sprites` diagnostic checkmarks made real gameplay testing too easy to
+skew. Use compile-time targets such as `diag-nobg` or `diag-nosprites` only when measuring
+those rows.
+
 ## What's here
 
 `src/nofrendo/` — upstream Nofrendo emulator core, unchanged. Keep it that way; all platform work goes in `src/`.

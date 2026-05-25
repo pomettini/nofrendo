@@ -170,8 +170,8 @@
       mem_writebyte(address, value); \
 }
 
-#ifdef NES6502_HOTOPS
-#define HOT_RELATIVE_BRANCH(condition) \
+#if defined(NES6502_HOTOPS) || defined(NES6502_FAST_BRANCHES)
+#define FAST_RELATIVE_BRANCH(condition) \
 { \
    if (condition) \
    { \
@@ -205,7 +205,12 @@
 */
 
 /* Immediate */
-#ifdef NES6502_PC_PTR
+#if defined(NES6502_PC_PTR) && defined(NES6502_FAST_OPERAND_BYTES)
+#define IMMEDIATE_BYTE(value) \
+{ \
+   FETCH_PC_BYTE_DIRECT(value); \
+}
+#elif defined(NES6502_PC_PTR)
 #define IMMEDIATE_BYTE(value) \
 { \
    FETCH_PC_BYTE(value); \
@@ -435,7 +440,12 @@
 #define  SET_NZ_FLAGS(value)     n_flag = z_flag = (value);
 
 /* For BCC, BCS, BEQ, BMI, BNE, BPL, BVC, BVS */
-#ifdef NES6502_PC_PTR
+#if defined(NES6502_PC_PTR) && defined(NES6502_FAST_BRANCHES)
+#define RELATIVE_BRANCH(condition) \
+{ \
+   FAST_RELATIVE_BRANCH(condition); \
+}
+#elif defined(NES6502_PC_PTR)
 #define RELATIVE_BRANCH(condition) \
 { \
    if (condition) \
@@ -2083,7 +2093,7 @@ int nes6502_execute(int timeslice_cycles)
 
       OPCODE_BEGIN(10)  /* BPL $nnnn */
 #ifdef NES6502_HOTOPS
-         HOT_RELATIVE_BRANCH(0 == (n_flag & N_FLAG));
+         FAST_RELATIVE_BRANCH(0 == (n_flag & N_FLAG));
 #else
          BPL();
 #endif
@@ -2837,7 +2847,7 @@ int nes6502_execute(int timeslice_cycles)
 
       OPCODE_BEGIN(D0)  /* BNE $nnnn */
 #ifdef NES6502_HOTOPS
-         HOT_RELATIVE_BRANCH(0 != z_flag);
+         FAST_RELATIVE_BRANCH(0 != z_flag);
 #else
          BNE();
 #endif
@@ -2946,7 +2956,7 @@ int nes6502_execute(int timeslice_cycles)
 
       OPCODE_BEGIN(F0)  /* BEQ $nnnn */
 #ifdef NES6502_HOTOPS
-         HOT_RELATIVE_BRANCH(0 == z_flag);
+         FAST_RELATIVE_BRANCH(0 == z_flag);
 #else
          BEQ();
 #endif

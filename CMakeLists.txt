@@ -86,6 +86,8 @@ option(NES6502_HOTOPS "Hand-specialize the hottest measured 6502 opcodes" OFF)
 option(NES6502_FAST_MEMIO "Bypass generic memory-handler scans for NES RAM mirror ranges" OFF)
 option(NES6502_DIRECT_MEMIO "Bypass memory-handler scans for common RAM/PPU/APU/input ranges" OFF)
 option(NES6502_FAST_JMP_ABS "Fast-path 6502 JMP absolute operand fetch" OFF)
+option(NES6502_FAST_BRANCHES "Fast-path taken relative branches with pc_ptr" OFF)
+option(NES6502_FAST_OPERAND_BYTES "Use pc_ptr for one-byte 6502 operand fetches" OFF)
 option(NES6502_JMP_SPIN "Fast-forward self-JMP idle loops to the end of the CPU slice" OFF)
 option(NES6502_LINEAR_ROM "Fast-path CPU ROM reads when $8000-$FFFF is one contiguous host block" OFF)
 if (AUDIO)
@@ -129,6 +131,8 @@ set(GAME_DEFINES
     $<$<BOOL:${NES6502_FAST_MEMIO}>:NES6502_FAST_MEMIO=1>
     $<$<BOOL:${NES6502_DIRECT_MEMIO}>:NES6502_DIRECT_MEMIO=1>
     $<$<BOOL:${NES6502_FAST_JMP_ABS}>:NES6502_FAST_JMP_ABS=1>
+    $<$<BOOL:${NES6502_FAST_BRANCHES}>:NES6502_FAST_BRANCHES=1>
+    $<$<BOOL:${NES6502_FAST_OPERAND_BYTES}>:NES6502_FAST_OPERAND_BYTES=1>
     $<$<BOOL:${NES6502_JMP_SPIN}>:NES6502_JMP_SPIN=1>
     $<$<BOOL:${NES6502_LINEAR_ROM}>:NES6502_LINEAR_ROM=1>
 )

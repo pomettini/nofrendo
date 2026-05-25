@@ -108,6 +108,18 @@ extern PlaydateAPI *pd;
 #define DIAG_CPU_FASTJMP "off"
 #endif
 
+#ifdef NES6502_FAST_BRANCHES
+#define DIAG_CPU_FASTBRANCH "on"
+#else
+#define DIAG_CPU_FASTBRANCH "off"
+#endif
+
+#ifdef NES6502_FAST_OPERAND_BYTES
+#define DIAG_CPU_FASTOPBYTE "on"
+#else
+#define DIAG_CPU_FASTOPBYTE "off"
+#endif
+
 #ifdef NES6502_JMP_SPIN
 #define DIAG_CPU_JMPSPIN "on"
 #else
@@ -234,6 +246,8 @@ void diag_frame_begin(void) {
                                  " cpu_hotops=" DIAG_CPU_HOTOPS
                                  " cpu_memio=" DIAG_CPU_MEMIO
                                  " cpu_fastjmp=" DIAG_CPU_FASTJMP
+                                 " cpu_fastbranch=" DIAG_CPU_FASTBRANCH
+                                 " cpu_fastopbyte=" DIAG_CPU_FASTOPBYTE
                                  " cpu_jmpspin=" DIAG_CPU_JMPSPIN
                                  " cpu_rom=" DIAG_CPU_ROM
                                  " cpu_split=" DIAG_CPU_SPLIT
