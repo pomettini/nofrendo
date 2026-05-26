@@ -33,9 +33,15 @@ Diagnostic builds are the default during performance work. Useful probes:
 make diag
 make diag-fpslite
 make diag-fastoamdma
+make diag-cycletrim
+make diag-jumptable
+make diag-fastbne
 make diag-fixedcycles
 make diag-fastjmp
 ```
+
+`diag-cycletrim` defaults to the conservative `CYCLEPCT=96`; override it with
+`CYCLEPCT=94 make diag-cycletrim`.
 
 ## Install On Device
 

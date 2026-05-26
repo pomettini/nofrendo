@@ -170,7 +170,7 @@
       mem_writebyte(address, value); \
 }
 
-#if defined(NES6502_HOTOPS) || defined(NES6502_FAST_BRANCHES)
+#if defined(NES6502_HOTOPS) || defined(NES6502_FAST_BRANCHES) || defined(NES6502_FAST_BNE)
 #define FAST_RELATIVE_BRANCH(condition) \
 { \
    if (condition) \
@@ -753,10 +753,17 @@
    RELATIVE_BRANCH(n_flag & N_FLAG); \
 }
 
+#if defined(NES6502_PC_PTR) && defined(NES6502_FAST_BNE)
+#define BNE() \
+{ \
+   FAST_RELATIVE_BRANCH(0 != z_flag); \
+}
+#else
 #define BNE() \
 { \
    RELATIVE_BRANCH(0 != z_flag); \
 }
+#endif
 
 #ifdef NES6502_SPINHACK
 #define BPL() \
@@ -1838,20 +1845,39 @@ uint32 nes6502_getcycles(bool reset_flag)
 #ifdef NES6502_JUMPTABLE
 
 #define  OPCODE_BEGIN(xx)  op##xx:
+#ifdef NES6502_PC_PTR
+#define  OPCODE_FETCH_DISPATCH \
+{ \
+   uint8 _op; \
+   if (__builtin_expect(pc_ptr >= pc_bank_end, 0)) PC_REBASE(); \
+   _op = *pc_ptr++; \
+   PC++; \
+   PROFILE_OPCODE(_op); \
+   goto *opcode_table[_op]; \
+}
+#else
+#define  OPCODE_FETCH_DISPATCH \
+{ \
+   uint8 _op = bank_readbyte(PC++); \
+   PROFILE_OPCODE(_op); \
+   goto *opcode_table[_op]; \
+}
+#endif
+
 #ifdef NES6502_DISASM
 
 #define  OPCODE_END \
    if (remaining_cycles <= 0) \
       goto end_execute; \
    log_printf(nes6502_disasm(PC, COMBINE_FLAGS(), A, X, Y, S)); \
-   goto *opcode_table[bank_readbyte(PC++)];
+   OPCODE_FETCH_DISPATCH
 
 #else /* !NES6520_DISASM */
 
 #define  OPCODE_END \
    if (remaining_cycles <= 0) \
       goto end_execute; \
-   goto *opcode_table[bank_readbyte(PC++)];
+   OPCODE_FETCH_DISPATCH
 
 #endif /* !NES6502_DISASM */
 

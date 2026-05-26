@@ -42,8 +42,17 @@ The `diag-fastbatch` batch-24 timing probe was also mixed and is not promoted. T
 promoted. `diag-fixedcycles` was safe but effectively flat, so do not stack future tests on
 it. `diag-fastoamdma` was safe in Mario 1-1, with no softlocks or enemy weirdness, but did
 not move the worst `cpu_only=25 ms` band enough to promote as the main answer by itself.
-The next probe is `diag-fpslite`: keep the current speed line, keep FPS logs, but remove the
-per-frame render timer calls to check whether diagnostics are costing the last few ms.
+`diag-fpslite` proved the remaining slowdowns are not diagnostic-timer overhead.
+`diag-fastbne` was mixed and is not promoted: it improved some old dips, but regressed
+others. `diag-cycletrim` at 92% was also mixed and is not promoted: it improved some windows
+but added annoying visual glitches and shifted a bad dip later in the level. The gentler
+96% cycle-trim probe had no meaningful visual glitches, but the speed result was still
+mixed: several windows improved, while some earlier busy windows regressed. The middle
+94% cycle-trim probe was not better and had a few minor graphical glitches, so keep
+cycle-trim experiments unpromoted. The next probe is `diag-jumptable`, which restores
+normal CPU timing (`cyclepct=100`) and tests computed-goto CPU opcode dispatch against the
+stable switch dispatcher. It has been installed as the single main `nofrendo.pdx` device
+package; expected banner is `build=2026-05-26 02:28:48` with `cpu_dispatch=jump`.
 
 ## What's here
 

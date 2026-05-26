@@ -82,6 +82,10 @@ extern PlaydateAPI *pd;
 #define DIAG_CYCLE_ACCUM "float"
 #endif
 
+#ifndef NES_CPU_CYCLE_PERCENT
+#define NES_CPU_CYCLE_PERCENT 100
+#endif
+
 #ifdef ALIGN_PRG_ROM
 #define DIAG_PRG_ALIGN "16k"
 #else
@@ -92,6 +96,12 @@ extern PlaydateAPI *pd;
 #define DIAG_CPU_LOOP_ALIGN "32"
 #else
 #define DIAG_CPU_LOOP_ALIGN "off"
+#endif
+
+#ifdef NES6502_JUMPTABLE_DISPATCH
+#define DIAG_CPU_DISPATCH "jump"
+#else
+#define DIAG_CPU_DISPATCH "switch"
 #endif
 
 #ifdef NES6502_SPINHACK
@@ -130,6 +140,12 @@ extern PlaydateAPI *pd;
 #define DIAG_CPU_FASTJMP "on"
 #else
 #define DIAG_CPU_FASTJMP "off"
+#endif
+
+#ifdef NES6502_FAST_BNE
+#define DIAG_CPU_FASTBNE "on"
+#else
+#define DIAG_CPU_FASTBNE "off"
 #endif
 
 #ifdef NES6502_FAST_BRANCHES
@@ -273,8 +289,10 @@ void diag_frame_begin(void) {
                                  " sprcache=" DIAG_PPU_SPRCACHE
                                  " oamdma=" DIAG_PPU_OAMDMA
                                  " cycleacc=" DIAG_CYCLE_ACCUM
+                                 " cyclepct=" DIAG_STRINGIFY(NES_CPU_CYCLE_PERCENT)
                                  " cpu_batch=" DIAG_STRINGIFY(NES_CPU_BATCH_SCANLINES)
                                  " cpu_opt=" NES6502_OPT_LEVEL_LABEL
+                                 " cpu_dispatch=" DIAG_CPU_DISPATCH
                                  " cpu_loop_align=" DIAG_CPU_LOOP_ALIGN
                                  " cpu_spin=" DIAG_CPU_SPIN
                                  " cpu_prof=" DIAG_CPU_PROF
@@ -282,6 +300,7 @@ void diag_frame_begin(void) {
                                  " cpu_hotops=" DIAG_CPU_HOTOPS
                                  " cpu_memio=" DIAG_CPU_MEMIO
                                  " cpu_fastjmp=" DIAG_CPU_FASTJMP
+                                 " cpu_fastbne=" DIAG_CPU_FASTBNE
                                  " cpu_fastbranch=" DIAG_CPU_FASTBRANCH
                                  " cpu_fastopbyte=" DIAG_CPU_FASTOPBYTE
                                  " cpu_fastmemops=" DIAG_CPU_FASTMEMOPS

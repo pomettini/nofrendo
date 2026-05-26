@@ -1537,7 +1537,7 @@ Device result:
 - Keep the code as a safe optional micro-optimization, but do not treat it as the main path
   to stable 50 fps.
 
-### FPS-only diagnostics - pending device results
+### FPS-only diagnostics - no material gain
 
 This probe tests whether the diagnostic hooks themselves are stealing enough time to matter.
 The normal diagnostic row calls `getCurrentTimeMilliseconds()` around every
@@ -1561,6 +1561,158 @@ Build target:
 - Built successfully for device and simulator on 2026-05-26, then installed over the single
   device `Games/nofrendo.pdx`. Expected device banner timestamp:
   `build=2026-05-26 00:14:04`.
+
+Device result:
+
+- Submitted banner: `build=2026-05-26 00:14:04`, `diag=fps`, `oamdma=fast`,
+  `cycleacc=float`, `cpu_batch=16`, `cpu_memio=direct`, `cpu_fastjmp=on`.
+- The row still has the same slow bands: `40 fps` at frames 840-900, `38-39 fps` at
+  frames 1500-1560, and `35 fps` at frame 1620.
+- Conclusion: per-frame diagnostic render timing is not the hidden remaining cost. Keep
+  `diag=fps` around for release-like subjective tests, but CPU hot-path work is still needed.
+
+### BNE-only fast branch - mixed, not promoted
+
+The broad `NES6502_FAST_BRANCHES` probe was mixed, likely because changing every branch
+inflated the already tight interpreter. This narrower probe targets only opcode `D0`
+(`BNE`), which was repeatedly near the top of the Mario opcode profile.
+
+What changes:
+
+- `NES6502_FAST_BNE=ON` makes only `BNE` use the `pc_ptr` branch path: direct operand fetch,
+  no `PC_REBASE()` when the branch target stays in the same 4 KB CPU page, and the same page
+  crossing cycle accounting.
+- Other branch opcodes stay on the current safe path.
+
+Build target:
+
+- `make diag-fastbne`
+- Expected settings: `audio_fill=direct`, `hudfps=off`, `lcd_dirty=draw`,
+  `ppu_strike=cycle`, `sprcache=all`, `oamdma=fast`, `cycleacc=float`, `cpu_batch=16`,
+  `cpu_opt=O3`, `cpu_memio=direct`, `cpu_fastjmp=on`, `cpu_fastbne=on`,
+  `cpu_fastbranch=off`, `cpu_rom=page`.
+
+Build/install status:
+
+- Built successfully for device and simulator on 2026-05-26, then installed over the single
+  device `Games/nofrendo.pdx`. Expected device banner timestamp:
+  `build=2026-05-26 00:20:26`.
+
+Device result:
+
+- Submitted banner: `build=2026-05-26 00:20:26`, `cpu_fastbne=on`,
+  `cpu_fastbranch=off`, `oamdma=fast`, `cycleacc=float`, `cpu_batch=16`.
+- Mixed result: old 1500-1620 area improved compared with the fast-OAM row, but the 840
+  window stayed bad (`39 fps`, `cpu_only=23 ms`) and a new/shifted 1680-1740 band hit
+  `37-38 fps`, `cpu_only=23-24 ms`.
+- Do not promote. This looks like another code-layout/cache tradeoff, not a robust win.
+
+### 92% CPU cycle budget - mixed, not promoted
+
+This is a deliberate speed-first accuracy tradeoff. The emulator runs only 92% of the usual
+CPU cycles per PPU scanline. In games that spend spare frame time in wait loops, this should
+remove wasted interpreter work while still letting the game update finish before NMI. If a
+game relies on the exact CPU budget, it can cause timing bugs or slow-motion behavior.
+
+What changes:
+
+- `NES_CPU_CYCLE_PERCENT=92` scales the per-scanline CPU cycle accumulator.
+- The current stable line is kept otherwise: batch 16, direct memory I/O, fast absolute-JMP
+  operand fetch, fast OAM DMA, normal sprite-zero timing, and no BNE fast path.
+
+Build target:
+
+- `make diag-cycletrim`
+- Expected settings: `cyclepct=92`, `audio_fill=direct`, `hudfps=off`, `lcd_dirty=draw`,
+  `ppu_strike=cycle`, `sprcache=all`, `oamdma=fast`, `cycleacc=float`, `cpu_batch=16`,
+  `cpu_opt=O3`, `cpu_memio=direct`, `cpu_fastjmp=on`, `cpu_fastbne=off`, `cpu_rom=page`.
+- Built successfully for device and simulator on 2026-05-26, then installed over the single
+  device `Games/nofrendo.pdx`. Expected device banner timestamp:
+  `build=2026-05-26 00:48:23`.
+
+Device result:
+
+- Submitted banner: `build=2026-05-26 00:48:23`, `cyclepct=92`, `oamdma=fast`,
+  `cpu_batch=16`, `cpu_memio=direct`, `cpu_fastjmp=on`.
+- It helped some old bands, especially around frames 840 and 1500-1560, but it did not
+  stabilize the level. The run still hit `38 fps` at frame 900, `41-43 fps` around
+  960-1200, and a worse shifted dip at frame 1800: `34 fps`, `avg=28 ms`,
+  `cpu_only=26 ms`.
+- Subjectively there were more visual glitches than normal. Do not promote 92%; it is too
+  blunt.
+
+### 96% CPU cycle budget - safe visually, mixed speed
+
+This is the same speed-first idea as the 92% row, but gentler. The goal is to see whether a
+small CPU-budget trim reduces wait-loop overhead without creating the extra visual glitches
+and shifted slow band seen at 92%.
+
+Build target:
+
+- `make diag-cycletrim`
+- Submitted banner: `build=2026-05-26 01:53:32`, `cyclepct=96`, `audio_fill=direct`,
+  `hudfps=off`, `lcd_dirty=draw`, `ppu_strike=cycle`, `sprcache=all`, `oamdma=fast`,
+  `cycleacc=float`, `cpu_batch=16`, `cpu_opt=O3`, `cpu_memio=direct`, `cpu_fastjmp=on`,
+  `cpu_fastbne=off`, `cpu_rom=page`.
+- Installed as the single main device package at `/Volumes/PLAYDATE/Games/nofrendo.pdx`;
+  verified no nested `nofrendo.pdx` directory before ejecting.
+- Device result: no meaningful visual glitches. There was one barely noticeable bad frame
+  mid-level, but this also happened in previous builds and is not a blocker right now.
+- Speed was mixed. The run improved some known windows (`900`, `960`, `1020`, `1200`,
+  `1500-1560`, and the late `2160-2280` band), but regressed/shifted others (`420-840`,
+  `1080-1140`, `1260`, `1380`, and `1620`). Worst submitted window was still `36 fps`,
+  `avg=27 ms`, `cpu_only=24 ms` at frame 1620.
+- Do not promote 96% as a clear win yet, but it proves that a moderate cycle trim can be
+  visually acceptable. Next probe: split the difference with `cyclepct=94`.
+
+### 94% CPU cycle budget - mixed, not promoted
+
+This is a calibration build between the glitchy 92% row and the visually safe 96% row. The
+goal is to see whether the project can get a little more CPU relief than 96% without
+bringing back the annoying visual glitches seen at 92%.
+
+Build target:
+
+- `make diag-cycletrim`
+- Submitted banner: `build=2026-05-26 02:19:47`, `cyclepct=94`, `audio_fill=direct`,
+  `hudfps=off`, `lcd_dirty=draw`, `ppu_strike=cycle`, `sprcache=all`, `oamdma=fast`,
+  `cycleacc=float`, `cpu_batch=16`, `cpu_opt=O3`, `cpu_memio=direct`, `cpu_fastjmp=on`,
+  `cpu_fastbne=off`, `cpu_rom=page`.
+- Installed as the single main device package at `/Volumes/PLAYDATE/Games/nofrendo.pdx`;
+  verified no nested `nofrendo.pdx` directory before ejecting.
+- Device result: still hits the same CPU-bound troughs. Worst submitted window was
+  `35 fps`, `avg=28 ms`, `cpu_only=25 ms` at frame 1620; other busy windows hit
+  `38-43 fps` with `cpu_only=20-23 ms`.
+- Subjective result: a few minor graphical glitches. Nothing serious, but worse than the
+  clean 96% visual result.
+- Do not promote. The cycle-trim line is useful calibration, but it mostly shifts slowdowns
+  and starts buying speed with visual risk before it reaches stable 50 fps.
+
+### Computed-goto CPU dispatch - pending device results
+
+This probe goes back to the timing-safe CPU budget (`cyclepct=100`) and tests the original
+Nofrendo GCC computed-goto opcode dispatcher instead of the current C `switch` dispatcher.
+If the Playdate branch predictor and I-cache like it, this could reduce per-instruction
+dispatch overhead in the remaining CPU-bound windows without changing emulated timing.
+
+What changes:
+
+- `NES6502_JUMPTABLE_DISPATCH=ON` stops forcing `NES6502_SWITCH` for `nes6502.c`.
+- The computed-goto fetch path was updated to keep the existing `pc_ptr` cache in sync, so
+  it can be tested on top of the current directmem/fastjmp line.
+- Normal timing is restored: `cyclepct=100`, `cpu_batch=16`.
+
+Build target:
+
+- `make diag-jumptable`
+- Expected settings: `cpu_dispatch=jump`, `cyclepct=100`, `audio_fill=direct`,
+  `hudfps=off`, `lcd_dirty=draw`, `ppu_strike=cycle`, `sprcache=all`, `oamdma=fast`,
+  `cycleacc=float`, `cpu_batch=16`, `cpu_opt=O3`, `cpu_memio=direct`, `cpu_fastjmp=on`,
+  `cpu_fastbne=off`, `cpu_rom=page`.
+- Built successfully for device and simulator on 2026-05-26. Expected device banner:
+  `build=2026-05-26 02:28:48`.
+- Installed as the single main device package at `/Volumes/PLAYDATE/Games/nofrendo.pdx`
+  and verified there is no nested `nofrendo.pdx` directory.
 
 ### Rendered-sprite pattern cache gating - regression
 
@@ -1789,6 +1941,16 @@ Build status on 2026-05-25:
   still reaches `cpu_only=25 ms` and `35 fps` in the busy band. The next probe is
   `diag-fpslite`, which removes per-frame render timing while keeping 60-frame FPS logs so
   we can compare against a more release-like build.
+- `diag-fpslite` was tested and did not materially improve the slow bands. The next probe is
+  `diag-fastbne`, a narrow version of the rejected broad branch fast path that touches only
+  the hot `BNE` opcode.
+- `diag-fastbne` was tested and rejected as mixed: some dips moved/improved, but other busy
+  bands regressed.
+- `diag-cycletrim` at 92% was tested and rejected as mixed. It improved some old bands but
+  added more visual glitches and shifted a bad dip to frame 1800. `diag-cycletrim` at 96%
+  was visually safe but mixed on speed. `diag-cycletrim` at 94% was mixed and had minor
+  visual glitches, so leave cycle-trim unpromoted. The next probe is `diag-jumptable`,
+  which restores `cyclepct=100` and tests computed-goto CPU dispatch.
 
 ### Background tile CHR cache — only if DTCM becomes available
 
@@ -1842,6 +2004,9 @@ make diag-fastbatch  # diagnostic build, directmem/fastjmp with FASTBATCH scanli
 make diag-skipcache  # diagnostic build, skip sprite render-cache rebuilds on skipped frames
 make diag-fastoamdma # diagnostic build, direct CPU-page copy for OAM DMA
 make diag-fpslite   # diagnostic build, FPS-only logs without render timing hooks
+make diag-cycletrim # diagnostic build, conservative 96% CPU-cycle budget per scanline
+make diag-jumptable # diagnostic build, computed-goto CPU opcode dispatch
+make diag-fastbne   # diagnostic build, fast-path only hot BNE branches
 make diag-fixedcycles # diagnostic build, fixed-point scanline cycle accumulator
 make diag-jmpspin    # diagnostic build, self-JMP idle-loop fast-forward enabled
 make diag-linearrom  # diagnostic build, contiguous PRG-ROM fast path enabled
@@ -1862,6 +2027,9 @@ make install-diag-fastbatch  # build + push as nofrendo.pdx
 make install-diag-skipcache  # build + push as nofrendo.pdx
 make install-diag-fastoamdma # build + push as nofrendo.pdx
 make install-diag-fpslite    # build + push as nofrendo.pdx
+make install-diag-cycletrim  # build + push as nofrendo.pdx
+make install-diag-jumptable  # build + push as nofrendo.pdx
+make install-diag-fastbne    # build + push as nofrendo.pdx
 make install-diag-fixedcycles # build + push as nofrendo.pdx
 make install-diag-jmpspin    # build + push as nofrendo.pdx
 make install-diag-linearrom  # build + push as nofrendo.pdx

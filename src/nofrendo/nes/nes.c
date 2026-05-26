@@ -46,15 +46,23 @@
 //#define  NES_MASTER_CLOCK     21477272.727272727272
 #define  NES_MASTER_CLOCK     (236250000 / 11)
 
+#ifndef NES_CPU_CYCLE_PERCENT
+#define  NES_CPU_CYCLE_PERCENT 100
+#endif
+
+#if NES_CPU_CYCLE_PERCENT <= 0
+#error NES_CPU_CYCLE_PERCENT must be positive
+#endif
+
 #ifdef NES_FIXED_SCANLINE_CYCLES
-#define  NES_SCANLINE_CYCLES_X3 341
+#define  NES_SCANLINE_CYCLES_X3 ((341 * NES_CPU_CYCLE_PERCENT) / 100)
 #define  NES_SCANLINE_CYCLES_INT() (nes.scanline_cycles / 3)
 #define  NES_SCANLINE_CYCLES_ADD_LINE() \
    do { nes.scanline_cycles += NES_SCANLINE_CYCLES_X3; } while (0)
 #define  NES_SCANLINE_CYCLES_SUB(cycles_) \
    do { nes.scanline_cycles -= (int) (cycles_) * 3; } while (0)
 #else
-#define  NES_SCANLINE_CYCLES  (1364.0 / NES_CLOCK_DIVIDER)
+#define  NES_SCANLINE_CYCLES  ((1364.0 * NES_CPU_CYCLE_PERCENT) / (NES_CLOCK_DIVIDER * 100.0))
 #define  NES_SCANLINE_CYCLES_INT() ((int) nes.scanline_cycles)
 #define  NES_SCANLINE_CYCLES_ADD_LINE() \
    do { nes.scanline_cycles += (float) NES_SCANLINE_CYCLES; } while (0)

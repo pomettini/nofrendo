@@ -79,8 +79,11 @@ option(ALIGN_PRG_ROM "Align iNES PRG ROM start for cache experiments" OFF)
 option(DIAG_CPU_EXEC_TIMING "Time every nes6502_execute call in diagnostic builds" OFF)
 set(NES_CPU_BATCH_SCANLINES "1" CACHE STRING
     "Run NES CPU cycles in batches this many scanlines wide for no-hblank mappers")
+set(NES_CPU_CYCLE_PERCENT "100" CACHE STRING
+    "Percent of normal CPU cycles to run per PPU scanline")
 set(NES6502_OPT_LEVEL "O3" CACHE STRING
     "Optimization level for nes6502.c performance experiments")
+option(NES6502_JUMPTABLE_DISPATCH "Use GCC computed-goto opcode dispatch instead of switch dispatch" OFF)
 option(NES6502_ALIGN_LOOPS "Align 6502 hot loops for performance experiments" OFF)
 option(NES6502_SPINHACK "Fast-forward selected PPUSTATUS polling loops" OFF)
 option(NES6502_OPPROFILE "Count executed 6502 opcodes in diagnostic windows" OFF)
@@ -89,6 +92,7 @@ option(NES6502_HOTOPS "Hand-specialize the hottest measured 6502 opcodes" OFF)
 option(NES6502_FAST_MEMIO "Bypass generic memory-handler scans for NES RAM mirror ranges" OFF)
 option(NES6502_DIRECT_MEMIO "Bypass memory-handler scans for common RAM/PPU/APU/input ranges" OFF)
 option(NES6502_FAST_JMP_ABS "Fast-path 6502 JMP absolute operand fetch" OFF)
+option(NES6502_FAST_BNE "Fast-path only the hot BNE relative branch" OFF)
 option(NES6502_FAST_BRANCHES "Fast-path taken relative branches with pc_ptr" OFF)
 option(NES6502_FAST_OPERAND_BYTES "Use pc_ptr for one-byte 6502 operand fetches" OFF)
 option(NES6502_FAST_MEMOPS "Hand-specialize hot 6502 memory load/store opcodes" OFF)
@@ -130,7 +134,9 @@ set(GAME_DEFINES
     $<$<BOOL:${ALIGN_PRG_ROM}>:ALIGN_PRG_ROM=1>
     $<$<BOOL:${DIAG_CPU_EXEC_TIMING}>:DIAG_CPU_EXEC_TIMING=1>
     NES_CPU_BATCH_SCANLINES=${NES_CPU_BATCH_SCANLINES}
+    NES_CPU_CYCLE_PERCENT=${NES_CPU_CYCLE_PERCENT}
     NES6502_OPT_LEVEL_LABEL="${NES6502_OPT_LEVEL}"
+    $<$<BOOL:${NES6502_JUMPTABLE_DISPATCH}>:NES6502_JUMPTABLE_DISPATCH=1>
     $<$<BOOL:${NES6502_ALIGN_LOOPS}>:NES6502_ALIGN_LOOPS=1>
     $<$<BOOL:${NES6502_SPINHACK}>:NES6502_SPINHACK=1>
     $<$<BOOL:${NES6502_OPPROFILE}>:NES6502_OPPROFILE=1>
@@ -139,6 +145,7 @@ set(GAME_DEFINES
     $<$<BOOL:${NES6502_FAST_MEMIO}>:NES6502_FAST_MEMIO=1>
     $<$<BOOL:${NES6502_DIRECT_MEMIO}>:NES6502_DIRECT_MEMIO=1>
     $<$<BOOL:${NES6502_FAST_JMP_ABS}>:NES6502_FAST_JMP_ABS=1>
+    $<$<BOOL:${NES6502_FAST_BNE}>:NES6502_FAST_BNE=1>
     $<$<BOOL:${NES6502_FAST_BRANCHES}>:NES6502_FAST_BRANCHES=1>
     $<$<BOOL:${NES6502_FAST_OPERAND_BYTES}>:NES6502_FAST_OPERAND_BYTES=1>
     $<$<BOOL:${NES6502_FAST_MEMOPS}>:NES6502_FAST_MEMOPS=1>
@@ -173,7 +180,10 @@ if (TOOLCHAIN STREQUAL "armgcc")
 
     # Keep 6502 flags measurable: code shape and I-cache pressure both matter.
     set(NES6502_COMPILE_FLAGS
-        "-${NES6502_OPT_LEVEL} -DNES6502_SWITCH -DNES6502_LEGAL_ONLY -DNES6502_PC_PTR")
+        "-${NES6502_OPT_LEVEL} -DNES6502_LEGAL_ONLY -DNES6502_PC_PTR")
+    if (NOT NES6502_JUMPTABLE_DISPATCH)
+        string(APPEND NES6502_COMPILE_FLAGS " -DNES6502_SWITCH")
+    endif()
     if (NES6502_ALIGN_LOOPS)
         string(APPEND NES6502_COMPILE_FLAGS " -falign-loops=32")
     endif()
