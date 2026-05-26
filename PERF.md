@@ -1719,7 +1719,7 @@ Build target:
 - Do not promote. Keep the option available, but the stable switch dispatcher remains the
   better release line.
 
-### Lazy total-cycle accounting - pending device results
+### Lazy total-cycle accounting - promoted current best
 
 This probe keeps the switch dispatcher and normal timing, but stops writing
 `cpu.total_cycles` on every interpreted opcode. `ADD_CYCLES()` still subtracts from the
@@ -1745,6 +1745,76 @@ Build target:
   `cpu_memio=direct`, `cpu_fastjmp=on`, `cpu_rom=page`.
 - Built successfully for device and simulator on 2026-05-26. Expected device banner:
   `build=2026-05-26 02:39:29`.
+- Installed as the single main device package at `/Volumes/PLAYDATE/Games/nofrendo.pdx`
+  and verified there is no nested `nofrendo.pdx` directory.
+- Device result: strongest Mario 1-1 row so far, with no visual glitches and the best
+  subjective smoothness reported. Most windows are `49-50 fps`.
+- Remaining slow windows are brief and CPU-bound: frames 840-900 are `43-44 fps` with
+  `cpu_only=20 ms`, frames 1560-1680 are `39-42 fps` with `cpu_only=21-23 ms`, and most
+  later windows recover to `49-50 fps`.
+- Promote as the new baseline. Keep normal timing (`cyclepct=100`) and switch dispatch.
+
+### BNE-only fast branch on lazy-cycle baseline - promoted current best
+
+The old `NES6502_FAST_BNE` probe was mixed before lazy cycle accounting. This retest keeps
+the new promoted baseline and adds only the BNE fast path, because opcode `D0` remained one
+of the measured hot opcodes in real-gameplay windows.
+
+Why this is worth retesting:
+
+- The lazy-cycle change substantially altered interpreter cost, so the earlier BNE result is
+  no longer definitive.
+- It is timing-safe: it changes how the BNE operand/target is fetched, not how many CPU
+  cycles the branch consumes.
+- It is narrower than the rejected all-branch and broad fast-PC paths.
+
+Build target:
+
+- `make diag-fastbne`
+- Expected settings: `cpu_cycles=lazy`, `cpu_fastbne=on`, `cpu_dispatch=switch`,
+  `cyclepct=100`, `audio_fill=direct`, `hudfps=off`, `lcd_dirty=draw`,
+  `ppu_strike=cycle`, `sprcache=all`, `oamdma=fast`, `cycleacc=float`,
+  `cpu_batch=16`, `cpu_opt=O3`, `cpu_memio=direct`, `cpu_fastjmp=on`,
+  `cpu_rom=page`.
+- Built successfully for device and simulator. Expected device banner timestamp:
+  `build=2026-05-26 02:47:10`.
+- Installed as the single main device package at `/Volumes/PLAYDATE/Games/nofrendo.pdx`
+  and verified there is no nested `nofrendo.pdx` directory.
+- Device results: two Mario 1-1 runs, no visual glitches. User notes the lowest-fps spots
+  included a slightly more stressful route than the prior comparison run.
+- Run 1: mostly `49-50 fps`; the first busy section improved to frames 840-960 at
+  `45/47/49 fps`; the later stressful section bottomed at frame 1620 `42 fps` and frame
+  1680 `44 fps`.
+- Run 2: mostly `49-50 fps`; frames 840-960 were `45/47/49 fps`; later route-dependent
+  dips were frames 1620-1920 at `46/47/46/46/42/42 fps`, then recovery to `49-50 fps`.
+- Compared with the pure lazy-cycle baseline, this improves the previously weak windows
+  without adding visual glitches. Promote `cpu_fastbne=on` as the new baseline.
+
+### BPL-only fast branch on lazy/BNE baseline - pending device results
+
+The next probe keeps the promoted lazy/BNE baseline and adds only a `BPL` fast path. The
+old opcode profiles repeatedly showed opcode `10` (`BPL`) near the top in real gameplay,
+but the all-branch fast path was too broad and not worth keeping.
+
+Why this is worth testing:
+
+- It is the same shape as the now-promoted `BNE` optimization: direct branch operand fetch
+  and same-bank target update, with unchanged branch timing.
+- It is narrower than the rejected `NES6502_FAST_BRANCHES` probe, so code-size/layout risk
+  is much lower.
+- If it helps, it should lift the remaining CPU-bound enemy/item windows without touching
+  PPU timing or renderer behavior.
+
+Build target:
+
+- `make diag-fastbpl`
+- Expected settings: `cpu_cycles=lazy`, `cpu_fastbne=on`, `cpu_fastbpl=on`,
+  `cpu_fastbranch=off`, `cpu_dispatch=switch`, `cyclepct=100`, `audio_fill=direct`,
+  `hudfps=off`, `lcd_dirty=draw`, `ppu_strike=cycle`, `sprcache=all`, `oamdma=fast`,
+  `cycleacc=float`, `cpu_batch=16`, `cpu_opt=O3`, `cpu_memio=direct`,
+  `cpu_fastjmp=on`, `cpu_rom=page`.
+- Built successfully for device and simulator. Expected device banner timestamp:
+  `build=2026-05-26 02:58:19`.
 - Installed as the single main device package at `/Volumes/PLAYDATE/Games/nofrendo.pdx`
   and verified there is no nested `nofrendo.pdx` directory.
 
@@ -2045,6 +2115,7 @@ make diag-cycletrim # diagnostic build, conservative 96% CPU-cycle budget per sc
 make diag-jumptable # diagnostic build, computed-goto CPU opcode dispatch
 make diag-lazycycles # diagnostic build, lazy total-cycle accounting
 make diag-fastbne   # diagnostic build, fast-path only hot BNE branches
+make diag-fastbpl   # diagnostic build, fast-path only hot BPL branch on lazy/BNE baseline
 make diag-fixedcycles # diagnostic build, fixed-point scanline cycle accumulator
 make diag-jmpspin    # diagnostic build, self-JMP idle-loop fast-forward enabled
 make diag-linearrom  # diagnostic build, contiguous PRG-ROM fast path enabled
@@ -2058,6 +2129,7 @@ make install-diag-faststrike # build + push as nofrendo.pdx
 make install-diag-fastmem    # build + push as nofrendo.pdx
 make install-diag-directmem  # build + push as nofrendo.pdx
 make install-diag-fastjmp    # build + push as nofrendo.pdx
+make install-diag-fastbpl    # build + push as nofrendo.pdx
 make install-diag-fastbranch # build + push as nofrendo.pdx
 make install-diag-fastopbyte # build + push as nofrendo.pdx
 make install-diag-fastmemops # build + push as nofrendo.pdx

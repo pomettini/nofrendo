@@ -154,6 +154,12 @@ extern PlaydateAPI *pd;
 #define DIAG_CPU_FASTBNE "off"
 #endif
 
+#ifdef NES6502_FAST_BPL
+#define DIAG_CPU_FASTBPL "on"
+#else
+#define DIAG_CPU_FASTBPL "off"
+#endif
+
 #ifdef NES6502_FAST_BRANCHES
 #define DIAG_CPU_FASTBRANCH "on"
 #else
@@ -308,6 +314,7 @@ void diag_frame_begin(void) {
                                  " cpu_memio=" DIAG_CPU_MEMIO
                                  " cpu_fastjmp=" DIAG_CPU_FASTJMP
                                  " cpu_fastbne=" DIAG_CPU_FASTBNE
+                                 " cpu_fastbpl=" DIAG_CPU_FASTBPL
                                  " cpu_fastbranch=" DIAG_CPU_FASTBRANCH
                                  " cpu_fastopbyte=" DIAG_CPU_FASTOPBYTE
                                  " cpu_fastmemops=" DIAG_CPU_FASTMEMOPS

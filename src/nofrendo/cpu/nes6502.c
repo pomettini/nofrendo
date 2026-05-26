@@ -177,7 +177,7 @@
       mem_writebyte(address, value); \
 }
 
-#if defined(NES6502_HOTOPS) || defined(NES6502_FAST_BRANCHES) || defined(NES6502_FAST_BNE)
+#if defined(NES6502_HOTOPS) || defined(NES6502_FAST_BRANCHES) || defined(NES6502_FAST_BNE) || defined(NES6502_FAST_BPL)
 #define FAST_RELATIVE_BRANCH(condition) \
 { \
    if (condition) \
@@ -776,6 +776,11 @@
 #define BPL() \
 { \
    RELATIVE_BRANCH_BPL_SPIN(0 == (n_flag & N_FLAG)); \
+}
+#elif defined(NES6502_PC_PTR) && defined(NES6502_FAST_BPL)
+#define BPL() \
+{ \
+   FAST_RELATIVE_BRANCH(0 == (n_flag & N_FLAG)); \
 }
 #else
 #define BPL() \

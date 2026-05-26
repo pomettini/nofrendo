@@ -94,6 +94,7 @@ option(NES6502_FAST_MEMIO "Bypass generic memory-handler scans for NES RAM mirro
 option(NES6502_DIRECT_MEMIO "Bypass memory-handler scans for common RAM/PPU/APU/input ranges" OFF)
 option(NES6502_FAST_JMP_ABS "Fast-path 6502 JMP absolute operand fetch" OFF)
 option(NES6502_FAST_BNE "Fast-path only the hot BNE relative branch" OFF)
+option(NES6502_FAST_BPL "Fast-path only the hot BPL relative branch" OFF)
 option(NES6502_FAST_BRANCHES "Fast-path taken relative branches with pc_ptr" OFF)
 option(NES6502_FAST_OPERAND_BYTES "Use pc_ptr for one-byte 6502 operand fetches" OFF)
 option(NES6502_FAST_MEMOPS "Hand-specialize hot 6502 memory load/store opcodes" OFF)
@@ -148,6 +149,7 @@ set(GAME_DEFINES
     $<$<BOOL:${NES6502_DIRECT_MEMIO}>:NES6502_DIRECT_MEMIO=1>
     $<$<BOOL:${NES6502_FAST_JMP_ABS}>:NES6502_FAST_JMP_ABS=1>
     $<$<BOOL:${NES6502_FAST_BNE}>:NES6502_FAST_BNE=1>
+    $<$<BOOL:${NES6502_FAST_BPL}>:NES6502_FAST_BPL=1>
     $<$<BOOL:${NES6502_FAST_BRANCHES}>:NES6502_FAST_BRANCHES=1>
     $<$<BOOL:${NES6502_FAST_OPERAND_BYTES}>:NES6502_FAST_OPERAND_BYTES=1>
     $<$<BOOL:${NES6502_FAST_MEMOPS}>:NES6502_FAST_MEMOPS=1>

@@ -55,7 +55,15 @@ line. The next probe is `diag-lazycycles`, which keeps normal timing and switch 
 but avoids writing `cpu.total_cycles` on every opcode, deriving live cycle totals from the
 active slice only when `nes6502_getcycles(false)` asks for them. It has been installed as
 the single main `nofrendo.pdx`; expected banner is `build=2026-05-26 02:39:29` with
-`cpu_cycles=lazy`.
+`cpu_cycles=lazy`. Device results make this the new promoted baseline: no visual glitches,
+best subjective smoothness so far, and most Mario 1-1 windows at `49-50 fps`. The next
+probe retests `diag-fastbne` on top of lazy-cycle accounting, because it is timing-safe and
+targets one of the remaining hot opcodes. Device results for `build=2026-05-26 02:47:10`,
+`cpu_cycles=lazy`, `cpu_fastbne=on` show no visual glitches across two Mario 1-1 runs and
+better behavior in the former weak windows. Promote this as the current best baseline. The
+next probe is `diag-fastbpl`, a similarly narrow BPL-only branch fast path layered on top of
+lazy/BNE. It has been built and installed as the single main `nofrendo.pdx`; expected banner
+is `build=2026-05-26 02:58:19`, `cpu_fastbne=on`, `cpu_fastbpl=on`.
 
 ## What's here
 

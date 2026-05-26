@@ -37,6 +37,7 @@ make diag-cycletrim
 make diag-jumptable
 make diag-lazycycles
 make diag-fastbne
+make diag-fastbpl
 make diag-fixedcycles
 make diag-fastjmp
 ```
