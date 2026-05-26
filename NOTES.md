@@ -49,10 +49,13 @@ but added annoying visual glitches and shifted a bad dip later in the level. The
 96% cycle-trim probe had no meaningful visual glitches, but the speed result was still
 mixed: several windows improved, while some earlier busy windows regressed. The middle
 94% cycle-trim probe was not better and had a few minor graphical glitches, so keep
-cycle-trim experiments unpromoted. The next probe is `diag-jumptable`, which restores
-normal CPU timing (`cyclepct=100`) and tests computed-goto CPU opcode dispatch against the
-stable switch dispatcher. It has been installed as the single main `nofrendo.pdx` device
-package; expected banner is `build=2026-05-26 02:28:48` with `cpu_dispatch=jump`.
+cycle-trim experiments unpromoted. `diag-jumptable` was visually clean but not a net speed
+win; it regressed important busy stretches, so keep the switch dispatcher as the stable
+line. The next probe is `diag-lazycycles`, which keeps normal timing and switch dispatch
+but avoids writing `cpu.total_cycles` on every opcode, deriving live cycle totals from the
+active slice only when `nes6502_getcycles(false)` asks for them. It has been installed as
+the single main `nofrendo.pdx`; expected banner is `build=2026-05-26 02:39:29` with
+`cpu_cycles=lazy`.
 
 ## What's here
 

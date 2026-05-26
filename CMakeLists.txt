@@ -84,6 +84,7 @@ set(NES_CPU_CYCLE_PERCENT "100" CACHE STRING
 set(NES6502_OPT_LEVEL "O3" CACHE STRING
     "Optimization level for nes6502.c performance experiments")
 option(NES6502_JUMPTABLE_DISPATCH "Use GCC computed-goto opcode dispatch instead of switch dispatch" OFF)
+option(NES6502_LAZY_CYCLES "Commit total CPU cycles once per execute slice instead of once per opcode" OFF)
 option(NES6502_ALIGN_LOOPS "Align 6502 hot loops for performance experiments" OFF)
 option(NES6502_SPINHACK "Fast-forward selected PPUSTATUS polling loops" OFF)
 option(NES6502_OPPROFILE "Count executed 6502 opcodes in diagnostic windows" OFF)
@@ -137,6 +138,7 @@ set(GAME_DEFINES
     NES_CPU_CYCLE_PERCENT=${NES_CPU_CYCLE_PERCENT}
     NES6502_OPT_LEVEL_LABEL="${NES6502_OPT_LEVEL}"
     $<$<BOOL:${NES6502_JUMPTABLE_DISPATCH}>:NES6502_JUMPTABLE_DISPATCH=1>
+    $<$<BOOL:${NES6502_LAZY_CYCLES}>:NES6502_LAZY_CYCLES=1>
     $<$<BOOL:${NES6502_ALIGN_LOOPS}>:NES6502_ALIGN_LOOPS=1>
     $<$<BOOL:${NES6502_SPINHACK}>:NES6502_SPINHACK=1>
     $<$<BOOL:${NES6502_OPPROFILE}>:NES6502_OPPROFILE=1>

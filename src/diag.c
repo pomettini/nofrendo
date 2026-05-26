@@ -104,6 +104,12 @@ extern PlaydateAPI *pd;
 #define DIAG_CPU_DISPATCH "switch"
 #endif
 
+#ifdef NES6502_LAZY_CYCLES
+#define DIAG_CPU_CYCLES "lazy"
+#else
+#define DIAG_CPU_CYCLES "global"
+#endif
+
 #ifdef NES6502_SPINHACK
 #define DIAG_CPU_SPIN "ppustatus"
 #else
@@ -293,6 +299,7 @@ void diag_frame_begin(void) {
                                  " cpu_batch=" DIAG_STRINGIFY(NES_CPU_BATCH_SCANLINES)
                                  " cpu_opt=" NES6502_OPT_LEVEL_LABEL
                                  " cpu_dispatch=" DIAG_CPU_DISPATCH
+                                 " cpu_cycles=" DIAG_CPU_CYCLES
                                  " cpu_loop_align=" DIAG_CPU_LOOP_ALIGN
                                  " cpu_spin=" DIAG_CPU_SPIN
                                  " cpu_prof=" DIAG_CPU_PROF

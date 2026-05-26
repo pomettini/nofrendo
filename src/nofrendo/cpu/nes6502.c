@@ -38,11 +38,18 @@
 #endif /* __GNUC__ */
 
 
+#ifdef NES6502_LAZY_CYCLES
+#define  ADD_CYCLES(x) \
+{ \
+   remaining_cycles -= (x); \
+}
+#else
 #define  ADD_CYCLES(x) \
 { \
    remaining_cycles -= (x); \
    cpu.total_cycles += (x); \
 }
+#endif
 
 /* PC host-pointer fast path.
 ** pc_ptr caches mem_page[PC>>12]+(PC&0xFFF), eliminating the double indirection
@@ -1454,6 +1461,11 @@ int (*nes6502_execute_ptr)(int total_cycles) = NULL;
 static nes6502_context cpu;
 
 static int remaining_cycles = 0; /* so we can release timeslice */
+#ifdef NES6502_LAZY_CYCLES
+static int lazy_cycle_active = 0;
+static int lazy_cycle_timeslice = 0;
+static int lazy_cycle_released = 0;
+#endif
 /* memory region pointers */
 static uint8 *ram = NULL, *stack = NULL;
 static uint8 *null_page;
@@ -1814,8 +1826,19 @@ uint32 nes6502_getcycles(bool reset_flag)
 {
    uint32 cycles = cpu.total_cycles;
 
+#ifdef NES6502_LAZY_CYCLES
+   if (lazy_cycle_active)
+      cycles += (uint32) (lazy_cycle_timeslice - remaining_cycles - lazy_cycle_released);
+#endif
+
    if (reset_flag)
+   {
       cpu.total_cycles = 0;
+#ifdef NES6502_LAZY_CYCLES
+      if (lazy_cycle_active)
+         lazy_cycle_timeslice = remaining_cycles + lazy_cycle_released;
+#endif
+   }
 
    return cycles;
 }
@@ -1993,6 +2016,11 @@ int nes6502_execute(int timeslice_cycles)
 #endif /* NES6502_JUMPTABLE */
 
    remaining_cycles = timeslice_cycles;
+#ifdef NES6502_LAZY_CYCLES
+   lazy_cycle_active = 1;
+   lazy_cycle_timeslice = timeslice_cycles;
+   lazy_cycle_released = 0;
+#endif
 
    GET_GLOBAL_REGS();
    PC_REBASE();
@@ -3048,6 +3076,11 @@ end_execute:
    }
 #endif /* !NES6502_JUMPTABLE */
 
+#ifdef NES6502_LAZY_CYCLES
+   cpu.total_cycles += lazy_cycle_timeslice - remaining_cycles - lazy_cycle_released;
+   lazy_cycle_active = 0;
+#endif
+
    /* store local copy of regs */
    STORE_LOCAL_REGS();
 
@@ -3160,6 +3193,10 @@ void nes6502_burn(int cycles)
 /* Release our timeslice */
 void nes6502_release(void)
 {
+#ifdef NES6502_LAZY_CYCLES
+   if (lazy_cycle_active && remaining_cycles > 0)
+      lazy_cycle_released += remaining_cycles;
+#endif
    remaining_cycles = 0;
 }
 

@@ -35,6 +35,7 @@ make diag-fpslite
 make diag-fastoamdma
 make diag-cycletrim
 make diag-jumptable
+make diag-lazycycles
 make diag-fastbne
 make diag-fixedcycles
 make diag-fastjmp

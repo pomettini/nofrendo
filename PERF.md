@@ -1688,7 +1688,7 @@ Build target:
 - Do not promote. The cycle-trim line is useful calibration, but it mostly shifts slowdowns
   and starts buying speed with visual risk before it reaches stable 50 fps.
 
-### Computed-goto CPU dispatch - pending device results
+### Computed-goto CPU dispatch - safe but not promoted
 
 This probe goes back to the timing-safe CPU budget (`cyclepct=100`) and tests the original
 Nofrendo GCC computed-goto opcode dispatcher instead of the current C `switch` dispatcher.
@@ -1711,6 +1711,40 @@ Build target:
   `cpu_fastbne=off`, `cpu_rom=page`.
 - Built successfully for device and simulator on 2026-05-26. Expected device banner:
   `build=2026-05-26 02:28:48`.
+- Installed as the single main device package at `/Volumes/PLAYDATE/Games/nofrendo.pdx`
+  and verified there is no nested `nofrendo.pdx` directory.
+- Device result: no visual glitches, but no net speed win. It improved or held some
+  windows, but regressed important busy stretches: frames 1560-1800 sat at `34-38 fps`
+  with `cpu_only=23-25 ms`, and frames 960-1260 were also mostly `36-43 fps`.
+- Do not promote. Keep the option available, but the stable switch dispatcher remains the
+  better release line.
+
+### Lazy total-cycle accounting - pending device results
+
+This probe keeps the switch dispatcher and normal timing, but stops writing
+`cpu.total_cycles` on every interpreted opcode. `ADD_CYCLES()` still subtracts from the
+global `remaining_cycles`, so `nes6502_release()` can still stop the slice immediately, but
+the total cycle counter is committed once at the end of `nes6502_execute()`.
+
+Why this is worth testing:
+
+- The remaining bad windows are CPU interpreter-bound, so a per-opcode global write is
+  exactly the kind of overhead that can matter on Playdate.
+- PPU sprite-zero timing still asks `nes6502_getcycles(false)` during `$2002` reads, so the
+  getter derives the live total from `cpu.total_cycles + slice_elapsed` while a CPU slice is
+  active.
+- `nes6502_release()` records unspent released cycles so OAM DMA release does not count the
+  rest of the slice as executed CPU time.
+
+Build target:
+
+- `make diag-lazycycles`
+- Expected settings: `cpu_dispatch=switch`, `cpu_cycles=lazy`, `cyclepct=100`,
+  `audio_fill=direct`, `hudfps=off`, `lcd_dirty=draw`, `ppu_strike=cycle`,
+  `sprcache=all`, `oamdma=fast`, `cycleacc=float`, `cpu_batch=16`, `cpu_opt=O3`,
+  `cpu_memio=direct`, `cpu_fastjmp=on`, `cpu_rom=page`.
+- Built successfully for device and simulator on 2026-05-26. Expected device banner:
+  `build=2026-05-26 02:39:29`.
 - Installed as the single main device package at `/Volumes/PLAYDATE/Games/nofrendo.pdx`
   and verified there is no nested `nofrendo.pdx` directory.
 
@@ -1949,8 +1983,11 @@ Build status on 2026-05-25:
 - `diag-cycletrim` at 92% was tested and rejected as mixed. It improved some old bands but
   added more visual glitches and shifted a bad dip to frame 1800. `diag-cycletrim` at 96%
   was visually safe but mixed on speed. `diag-cycletrim` at 94% was mixed and had minor
-  visual glitches, so leave cycle-trim unpromoted. The next probe is `diag-jumptable`,
-  which restores `cyclepct=100` and tests computed-goto CPU dispatch.
+  visual glitches, so leave cycle-trim unpromoted.
+- `diag-jumptable` was tested and rejected as safe but not faster: no visual glitches, but
+  it regressed the mid-level busy stretch. The next probe is `diag-lazycycles`, which keeps
+  `cyclepct=100` and switch dispatch while removing the per-opcode `cpu.total_cycles`
+  write.
 
 ### Background tile CHR cache — only if DTCM becomes available
 
@@ -2006,6 +2043,7 @@ make diag-fastoamdma # diagnostic build, direct CPU-page copy for OAM DMA
 make diag-fpslite   # diagnostic build, FPS-only logs without render timing hooks
 make diag-cycletrim # diagnostic build, conservative 96% CPU-cycle budget per scanline
 make diag-jumptable # diagnostic build, computed-goto CPU opcode dispatch
+make diag-lazycycles # diagnostic build, lazy total-cycle accounting
 make diag-fastbne   # diagnostic build, fast-path only hot BNE branches
 make diag-fixedcycles # diagnostic build, fixed-point scanline cycle accumulator
 make diag-jmpspin    # diagnostic build, self-JMP idle-loop fast-forward enabled
@@ -2029,6 +2067,7 @@ make install-diag-fastoamdma # build + push as nofrendo.pdx
 make install-diag-fpslite    # build + push as nofrendo.pdx
 make install-diag-cycletrim  # build + push as nofrendo.pdx
 make install-diag-jumptable  # build + push as nofrendo.pdx
+make install-diag-lazycycles # build + push as nofrendo.pdx
 make install-diag-fastbne    # build + push as nofrendo.pdx
 make install-diag-fixedcycles # build + push as nofrendo.pdx
 make install-diag-jmpspin    # build + push as nofrendo.pdx
