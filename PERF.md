@@ -1790,7 +1790,7 @@ Build target:
 - Compared with the pure lazy-cycle baseline, this improves the previously weak windows
   without adding visual glitches. Promote `cpu_fastbne=on` as the new baseline.
 
-### BPL-only fast branch on lazy/BNE baseline - pending device results
+### BPL-only fast branch on lazy/BNE baseline - promoted current best
 
 The next probe keeps the promoted lazy/BNE baseline and adds only a `BPL` fast path. The
 old opcode profiles repeatedly showed opcode `10` (`BPL`) near the top in real gameplay,
@@ -1817,6 +1817,37 @@ Build target:
   `build=2026-05-26 02:58:19`.
 - Installed as the single main device package at `/Volumes/PLAYDATE/Games/nofrendo.pdx`
   and verified there is no nested `nofrendo.pdx` directory.
+- Device result: one Mario 1-1 run, no visual glitches.
+- Most windows are `49-50 fps`; the busy frame 840-960 band is `49/45/47 fps`, and the
+  later busy band is frames 1620-1800 at `49/44/44/45 fps` before recovering to `50 fps`.
+- Compared with the BNE-only baseline, this improves the worst observed floor in the
+  submitted logs from `42 fps` to `44 fps` without adding visual issues. Promote
+  `cpu_fastbpl=on` as the current best baseline.
+
+### BEQ-only fast branch on lazy/BNE/BPL baseline - pending device results
+
+This probe keeps the promoted lazy/BNE/BPL baseline and adds only a `BEQ` fast path. Opcode
+`F0` (`BEQ`) was also frequently present in the historical real-gameplay opcode profiles.
+
+Why this is worth testing:
+
+- It follows the same timing-safe pattern as the promoted BNE/BPL fast paths.
+- It remains much narrower than the rejected all-branch path.
+- The remaining dips are still CPU-bound, so one more hot branch may help without touching
+  PPU behavior.
+
+Build target:
+
+- `make diag-fastbeq`
+- Expected settings: `cpu_cycles=lazy`, `cpu_fastbne=on`, `cpu_fastbpl=on`,
+  `cpu_fastbeq=on`, `cpu_fastbranch=off`, `cpu_dispatch=switch`, `cyclepct=100`,
+  `audio_fill=direct`, `hudfps=off`, `lcd_dirty=draw`, `ppu_strike=cycle`,
+  `sprcache=all`, `oamdma=fast`, `cycleacc=float`, `cpu_batch=16`, `cpu_opt=O3`,
+  `cpu_memio=direct`, `cpu_fastjmp=on`, `cpu_rom=page`.
+- Built successfully for device and simulator. Expected device banner timestamp:
+  `build=2026-05-26 12:46:08`.
+- Device install is pending; `make _push` could not find a connected Playdate on
+  `/dev/cu.usbmodem*`.
 
 ### Rendered-sprite pattern cache gating - regression
 
@@ -2116,6 +2147,7 @@ make diag-jumptable # diagnostic build, computed-goto CPU opcode dispatch
 make diag-lazycycles # diagnostic build, lazy total-cycle accounting
 make diag-fastbne   # diagnostic build, fast-path only hot BNE branches
 make diag-fastbpl   # diagnostic build, fast-path only hot BPL branch on lazy/BNE baseline
+make diag-fastbeq   # diagnostic build, fast-path only hot BEQ branch on lazy/BNE/BPL baseline
 make diag-fixedcycles # diagnostic build, fixed-point scanline cycle accumulator
 make diag-jmpspin    # diagnostic build, self-JMP idle-loop fast-forward enabled
 make diag-linearrom  # diagnostic build, contiguous PRG-ROM fast path enabled
@@ -2130,6 +2162,7 @@ make install-diag-fastmem    # build + push as nofrendo.pdx
 make install-diag-directmem  # build + push as nofrendo.pdx
 make install-diag-fastjmp    # build + push as nofrendo.pdx
 make install-diag-fastbpl    # build + push as nofrendo.pdx
+make install-diag-fastbeq    # build + push as nofrendo.pdx
 make install-diag-fastbranch # build + push as nofrendo.pdx
 make install-diag-fastopbyte # build + push as nofrendo.pdx
 make install-diag-fastmemops # build + push as nofrendo.pdx

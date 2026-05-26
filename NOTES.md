@@ -63,7 +63,11 @@ targets one of the remaining hot opcodes. Device results for `build=2026-05-26 0
 better behavior in the former weak windows. Promote this as the current best baseline. The
 next probe is `diag-fastbpl`, a similarly narrow BPL-only branch fast path layered on top of
 lazy/BNE. It has been built and installed as the single main `nofrendo.pdx`; expected banner
-is `build=2026-05-26 02:58:19`, `cpu_fastbne=on`, `cpu_fastbpl=on`.
+is `build=2026-05-26 02:58:19`, `cpu_fastbne=on`, `cpu_fastbpl=on`. Device results show no
+visual glitches and a better observed floor (`44 fps`), so promote it. The next probe is
+`diag-fastbeq`, a BEQ-only branch fast path layered on lazy/BNE/BPL. It has been built
+locally with expected device banner `build=2026-05-26 12:46:08`, `cpu_fastbeq=on`, but it
+has not been installed because no Playdate was visible on `/dev/cu.usbmodem*`.
 
 ## What's here
 

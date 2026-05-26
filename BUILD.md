@@ -38,6 +38,7 @@ make diag-jumptable
 make diag-lazycycles
 make diag-fastbne
 make diag-fastbpl
+make diag-fastbeq
 make diag-fixedcycles
 make diag-fastjmp
 ```

@@ -177,7 +177,7 @@
       mem_writebyte(address, value); \
 }
 
-#if defined(NES6502_HOTOPS) || defined(NES6502_FAST_BRANCHES) || defined(NES6502_FAST_BNE) || defined(NES6502_FAST_BPL)
+#if defined(NES6502_HOTOPS) || defined(NES6502_FAST_BRANCHES) || defined(NES6502_FAST_BNE) || defined(NES6502_FAST_BPL) || defined(NES6502_FAST_BEQ)
 #define FAST_RELATIVE_BRANCH(condition) \
 { \
    if (condition) \
@@ -740,10 +740,17 @@
    RELATIVE_BRANCH(0 != c_flag); \
 }
 
+#if defined(NES6502_PC_PTR) && defined(NES6502_FAST_BEQ)
+#define BEQ() \
+{ \
+   FAST_RELATIVE_BRANCH(0 == z_flag); \
+}
+#else
 #define BEQ() \
 { \
    RELATIVE_BRANCH(0 == z_flag); \
 }
+#endif
 
 /* bit 7/6 of data move into N/V flags */
 #define BIT(cycles, read_func) \
