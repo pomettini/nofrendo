@@ -12,15 +12,18 @@ If your SDK is elsewhere, pass `SDK=/path/to/PlaydateSDK` to `make`.
 
 ## ROM
 
-The emulator loads `cartridge.nes` from the app bundle. Put your ROM at:
+On Playdate, the emulator opens a ROM picker at startup. Put `.nes` files in:
 
 ```sh
-Source/cartridge.nes
+/Shared/Emulation/nes/games/
 ```
+
+ROMs are loaded only through the picker.
 
 ## Build
 
 ```sh
+git submodule update --init --recursive
 make        # build device + simulator and create nofrendo.pdx
 make device # device binary only
 make sim    # simulator binary only

@@ -62,7 +62,11 @@ void osd_shutdown(void) {
 
 int osd_main(int argc, char *argv[]) {
     config.filename = configfilename;
-    return main_loop("cartridge.nes", system_nes);
+    if (argc <= 1 || !argv || !argv[1] || !argv[1][0]) {
+        pd->system->logToConsole("[rom] no ROM selected; use the ROM picker");
+        return 1;
+    }
+    return main_loop(argv[1], system_nes);
 }
 
 void osd_getmouse(int *x, int *y, int *button) {

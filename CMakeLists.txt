@@ -56,6 +56,7 @@ set(PLATFORM_SOURCES
     src/sound.c
     src/stubs.c
     src/diag.c
+    third_party/pd-rom-picker/src/rom_picker.c
 )
 
 
@@ -113,6 +114,7 @@ set(GAME_INCLUDES
     src/nofrendo/nes
     src/nofrendo/libsnss
     src/nofrendo/cpu
+    third_party/pd-rom-picker/src
 )
 if (AUDIO)
     list(APPEND GAME_INCLUDES src/nofrendo/sndhrdw)
@@ -178,6 +180,21 @@ else()
 endif()
 
 include(${SDK}/C_API/buildsupport/playdate_game.cmake)
+
+if (TOOLCHAIN STREQUAL "armgcc")
+    set(PDX_PACKAGE_DIR "${PRODUCT_DIR}/${PLAYDATE_GAME_DEVICE}.pdx")
+    set(PDX_PACKAGE_TARGET ${PLAYDATE_GAME_DEVICE})
+else()
+    set(PDX_PACKAGE_DIR "${PRODUCT_DIR}/${PLAYDATE_GAME_NAME}.pdx")
+    set(PDX_PACKAGE_TARGET ${PLAYDATE_GAME_NAME})
+endif()
+
+add_custom_command(
+    TARGET ${PDX_PACKAGE_TARGET} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E rm -f
+        "${PDX_PACKAGE_DIR}/cartridge.nes"
+        "${PDX_PACKAGE_DIR}/._cartridge.nes"
+)
 
 # The SDK unconditionally adds -O2 as a PUBLIC flag, which comes after our -O3
 # and wins. Re-append -O3 here so it is the last optimisation flag on the command line.

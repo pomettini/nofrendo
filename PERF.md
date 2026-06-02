@@ -1824,7 +1824,7 @@ Build target:
   submitted logs from `42 fps` to `44 fps` without adding visual issues. Promote
   `cpu_fastbpl=on` as the current best baseline.
 
-### BEQ-only fast branch on lazy/BNE/BPL baseline - pending device results
+### BEQ-only fast branch on lazy/BNE/BPL baseline - installed for device test
 
 This probe keeps the promoted lazy/BNE/BPL baseline and adds only a `BEQ` fast path. Opcode
 `F0` (`BEQ`) was also frequently present in the historical real-gameplay opcode profiles.
@@ -1846,8 +1846,10 @@ Build target:
   `cpu_memio=direct`, `cpu_fastjmp=on`, `cpu_rom=page`.
 - Built successfully for device and simulator. Expected device banner timestamp:
   `build=2026-05-26 12:46:08`.
-- Device install is pending; `make _push` could not find a connected Playdate on
-  `/dev/cu.usbmodem*`.
+- Installed over the single main device package at `/Volumes/PLAYDATE/Games/nofrendo.pdx`
+  on 2026-05-27 after `make _push` hit the mounted-volume permission issue.
+- Verified `pdex.bin` matches the local package and that there is no nested
+  `nofrendo.pdx` directory. Device gameplay result is pending.
 
 ### Rendered-sprite pattern cache gating - regression
 

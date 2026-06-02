@@ -66,8 +66,8 @@ lazy/BNE. It has been built and installed as the single main `nofrendo.pdx`; exp
 is `build=2026-05-26 02:58:19`, `cpu_fastbne=on`, `cpu_fastbpl=on`. Device results show no
 visual glitches and a better observed floor (`44 fps`), so promote it. The next probe is
 `diag-fastbeq`, a BEQ-only branch fast path layered on lazy/BNE/BPL. It has been built
-locally with expected device banner `build=2026-05-26 12:46:08`, `cpu_fastbeq=on`, but it
-has not been installed because no Playdate was visible on `/dev/cu.usbmodem*`.
+locally and installed as the single main `nofrendo.pdx`; expected device banner is
+`build=2026-05-26 12:46:08`, `cpu_fastbeq=on`. Device gameplay results are pending.
 
 ## What's here
 
@@ -84,7 +84,7 @@ has not been installed because no Playdate was visible on `/dev/cu.usbmodem*`.
 (`pd->sound->addSource`). The APU fills a buffer; the callback drains it. Sample rate:
 22050 Hz mono, 8-bit (matches the existing `osd_getsoundinfo` stub).
 
-**ROM loading.** Playdate reads files from the data folder on the SD card via `pd->file->open`. The ROM path should be hardcoded as `"cartridge.nes"` initially, matching the NumWorks convention.
+**ROM loading.** Startup uses `pd-rom-picker` to browse `.nes` files from `/Shared/Emulation/nes/games/`, then passes the selected path into the existing Nofrendo loader. ROMs are loaded only through the picker.
 
 **Save states.** The Nofrendo statefile API already exists (`nesstate.c`). `statefile_wrapper` stubs it out on NumWorks; on Playdate we can implement it for real using `pd->file->open` with write access.
 
@@ -100,8 +100,8 @@ New files created in `src/`:
 
 | File | Responsibility |
 |---|---|
-| `main.c` | `eventHandler` entry point; register update callback; call `nofrendo_main` |
-| `osd.c` | `osd_init`, `osd_shutdown`, `osd_main` (calls `main_loop("cartridge.nes", system_nes)`) |
+| `main.c` | `eventHandler` entry point; start ROM picker; launch `nofrendo_main` with selected ROM |
+| `osd.c` | `osd_init`, `osd_shutdown`, `osd_main` (calls `main_loop(selected_rom, system_nes)`) |
 | `timing.c` | `osd_installtimer`, `osd_nofrendo_ticks` via `pd->system->getCurrentTimeMilliseconds()` |
 | `sound.c` | `osd_setsound`, `osd_getsoundinfo` stubs (silence until Phase 5) |
 | `stubs.c` | GUI stubs, `vid_*` stubs — same as NumWorks version |
@@ -130,7 +130,8 @@ Note: use `getFrame()` not `getDisplayBufferBitmap()` — the latter is a read-o
 - [x] `AUDIO_DIRECT_RING` fills the SPSC ring directly, avoiding an extra temp-buffer copy on the game thread
 
 ### Phase 6 — ROM loading from SD card ✓
-- [x] `osd_getromdata` loads `"cartridge.nes"` from the bundle via `pd->file->stat` + `pd->file->open`
+- [x] `pd-rom-picker` scans `/Shared/Emulation/nes/games/` for `.nes` files
+- [x] `osd_getromdata` loads the selected ROM path via `pd->file->stat` + `pd->file->open`
 - [x] `osd_unloadromdata` frees the heap buffer
 
 ### Phase 7 — Performance ✓ (first pass)
