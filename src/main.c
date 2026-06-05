@@ -13,6 +13,43 @@ extern void nes6502_itcm_init(void *(*alloc_fn)(void *, size_t));
 
 static char selected_rom_path[ROM_PICKER_MAX_PATH];
 static int emulator_started = 0;
+static int return_to_picker_requested = 0;
+
+static void start_rom_picker(void);
+
+static void clear_screen_to_black(void) {
+  pd->graphics->setDrawMode(kDrawModeCopy);
+  pd->graphics->clear(kColorBlack);
+
+  uint8_t *frame = pd->graphics->getFrame();
+  if (frame)
+    memset(frame, 0x00, LCD_ROWSIZE * LCD_ROWS);
+
+  pd->graphics->markUpdatedRows(0, LCD_ROWS - 1);
+  pd->graphics->display();
+}
+
+static void menu_return_to_picker(void *userdata) {
+  (void)userdata;
+  return_to_picker_requested = 1;
+}
+
+static void install_emulator_menu(void) {
+  pd->system->removeAllMenuItems();
+  pd->system->addMenuItem("ROM Picker", menu_return_to_picker, NULL);
+}
+
+int app_return_to_picker_if_requested(void) {
+  if (!return_to_picker_requested)
+    return 0;
+
+  return_to_picker_requested = 0;
+  main_quit();
+  emulator_started = 0;
+  selected_rom_path[0] = '\0';
+  start_rom_picker();
+  return 1;
+}
 
 static void launch_rom(const char *path, void *userdata) {
   (void)userdata;
@@ -23,12 +60,17 @@ static void launch_rom(const char *path, void *userdata) {
   emulator_started = 1;
   snprintf(selected_rom_path, sizeof(selected_rom_path), "%s", path);
   rom_picker_free();
+  clear_screen_to_black();
+  install_emulator_menu();
 
   char *argv[] = {"nofrendo", selected_rom_path};
   int rc = nofrendo_main(2, argv);
   if (rc != 0) {
     pd->system->logToConsole("[rom] failed to launch %s (%d)",
                              selected_rom_path, rc);
+    emulator_started = 0;
+    selected_rom_path[0] = '\0';
+    start_rom_picker();
   }
 }
 
@@ -39,6 +81,8 @@ static int picker_update(void *userdata) {
 }
 
 static void start_rom_picker(void) {
+  pd->system->removeAllMenuItems();
+
   static const char *extensions[] = {"nes", NULL};
   RomPickerConfig config = {
       .folder = ROM_PICKER_FOLDER,

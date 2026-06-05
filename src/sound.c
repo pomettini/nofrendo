@@ -10,6 +10,7 @@ extern PlaydateAPI *pd;
 #define MAX_FILL     1024   /* max samples generated per update call */
 
 static void (*apu_fill)(void *buf, int len) = NULL;
+static SoundSource *audio_source = NULL;
 
 static int16_t          ring[RING_SIZE];
 static volatile unsigned int ring_write = 0;   /* written by game thread only */
@@ -19,6 +20,14 @@ static uint32_t last_fill_ms = 0;
 
 /* Playdate audio callback — runs on the audio thread */
 static int audio_callback(void *ctx, int16_t *left, int16_t *right, int len) {
+    (void)ctx;
+    (void)right;
+
+    if (!apu_fill) {
+        memset(left, 0, len * sizeof(int16_t));
+        return 1;
+    }
+
     /* Source is 22050 Hz, output is 44100 Hz → upsample 2:1.
        len is the number of 44100-Hz samples wanted; we need len/2 source samples. */
     int src_needed = len / 2;
@@ -39,10 +48,25 @@ static int audio_callback(void *ctx, int16_t *left, int16_t *right, int len) {
     return 1;
 }
 
+void osd_stopsound(void) {
+    apu_fill = NULL;
+
+    if (audio_source) {
+        pd->sound->removeSource(audio_source);
+        audio_source = NULL;
+    }
+
+    ring_write = 0;
+    ring_read = 0;
+    memset(ring, 0, sizeof(ring));
+}
+
 void osd_setsound(void (*playfunc)(void *buffer, int length)) {
+    osd_stopsound();
+
     apu_fill     = playfunc;
     last_fill_ms = pd->system->getCurrentTimeMilliseconds();
-    pd->sound->addSource(audio_callback, NULL, 0);  /* 0 = mono */
+    audio_source = pd->sound->addSource(audio_callback, NULL, 0);  /* 0 = mono */
 }
 
 void osd_getsoundinfo(sndinfo_t *info) {

@@ -13,6 +13,7 @@ extern PlaydateAPI *pd;
 static char configfilename[] = "nofrendo.cfg";
 
 extern void sound_fill_buffer(void);
+extern int app_return_to_picker_if_requested(void);
 
 /* Render 1 out of every FRAME_SKIP NES frames. 1 = no skip (full render
    every frame). 2 = render every other frame (halves PPU pixel cost).
@@ -22,6 +23,9 @@ extern void sound_fill_buffer(void);
 static int frame_num = 0;
 
 static int playdate_update(void *ud) {
+    if (app_return_to_picker_if_requested())
+        return 1;
+
     frame_num++;
     int draw = (frame_num % FRAME_SKIP == 0);
 

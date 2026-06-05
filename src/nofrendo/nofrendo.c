@@ -93,6 +93,7 @@ void main_eject(void)
    switch (console.type)
    {
    case system_nes:
+      osd_stopsound();
       nes_poweroff();
       nes_destroy(&(console.machine.nes));
       break;

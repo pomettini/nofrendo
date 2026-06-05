@@ -54,6 +54,7 @@
 
 
 extern void osd_setsound(void (*playfunc)(void *buffer, int size));
+extern void osd_stopsound(void);
 
 
 #ifndef NSF_PLAYER
