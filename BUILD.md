@@ -24,13 +24,19 @@ ROMs are loaded only through the picker.
 
 ```sh
 git submodule update --init --recursive
-make        # build device + simulator and create nofrendo.pdx
-make device # device binary only
-make sim    # simulator binary only
+make        # promoted performance build: device + simulator + nofrendo.pdx
+make device # promoted performance device binary only
+make sim    # promoted performance simulator binary only
 make clean  # remove build outputs
 ```
 
-Diagnostic builds are the default during performance work. Useful probes:
+The default `make`, `make device`, `make sim`, and `make install` path must always use the
+current promoted performance line. In the Makefile this is `FLAGS ?= $(FAST_FLAGS)`, which
+currently enables batch-16 CPU slices, direct CPU memory I/O, fast absolute JMP, lazy cycle
+accounting, BNE/BPL/BEQ fast paths, direct audio ring fill, and fast OAM DMA.
+
+Named diagnostic targets use `PROBE_FLAGS` plus their explicit experiment flags so they can
+still measure individual variants against the neutral baseline. Useful probes:
 
 ```sh
 make diag
