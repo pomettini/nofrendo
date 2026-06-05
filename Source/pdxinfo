@@ -1,7 +1,7 @@
 name=Nofrendo
-author=nwagyu & Pomettini
+author=Pomettini & nwagyu
 description=NES emulator
 bundleID=com.pomettini.nofrendo
 version=0.1
 buildNumber=1
-imagePath=
+imagePath=SystemAssets/
