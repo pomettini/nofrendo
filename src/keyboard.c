@@ -23,18 +23,39 @@ static void fire(int evt, int state) {
     fn(state);
 }
 
-/* Flags set by menu callbacks while the game loop is paused.
-   The press is latched here and released on the next osd_getinput call,
-   so the NES sees the button held for exactly one frame. */
-static bool start_pending  = false;
-static bool select_pending = false;
+static bool crank_start_down  = false;
+static bool crank_select_down = false;
 
-static void menu_start(void *ud)  { start_pending  = true; fire(event_joypad1_start,  INP_STATE_MAKE); }
-static void menu_select(void *ud) { select_pending = true; fire(event_joypad1_select, INP_STATE_MAKE); }
+static void set_button_state(int evt, bool *down, bool should_be_down) {
+    if (*down == should_be_down)
+        return;
+
+    fire(evt, should_be_down ? INP_STATE_MAKE : INP_STATE_BREAK);
+    *down = should_be_down;
+}
+
+static void update_crank_buttons(void) {
+    bool select_down = false;
+    bool start_down  = false;
+
+    if (!pd->system->isCrankDocked()) {
+        float angle = pd->system->getCrankAngle();
+        while (angle < 0.0f)
+            angle += 360.0f;
+        while (angle >= 360.0f)
+            angle -= 360.0f;
+
+        select_down = angle < 60.0f;
+        start_down  = angle > 180.0f;
+    }
+
+    set_button_state(event_joypad1_select, &crank_select_down, select_down);
+    set_button_state(event_joypad1_start, &crank_start_down, start_down);
+}
 
 void osd_input_init(void) {
-    pd->system->addMenuItem("Start",  menu_start,  NULL);
-    pd->system->addMenuItem("Select", menu_select, NULL);
+    crank_start_down = false;
+    crank_select_down = false;
 }
 
 void osd_getinput(void) {
@@ -46,7 +67,5 @@ void osd_getinput(void) {
         if (released & map[i].btn) fire(map[i].evt, INP_STATE_BREAK);
     }
 
-    /* Release latched Start/Select now that one frame has run with them pressed */
-    if (start_pending)  { fire(event_joypad1_start,  INP_STATE_BREAK); start_pending  = false; }
-    if (select_pending) { fire(event_joypad1_select, INP_STATE_BREAK); select_pending = false; }
+    update_crank_buttons();
 }
