@@ -6,6 +6,41 @@ Target: **50 fps** (PAL NES speed). Current best full-level Mario row:
 
 ---
 
+## Current Promoted Runtime — 2026-06-06
+
+The default `make`, `make device`, `make sim`, and `make install` path uses
+`FAST_FLAGS` via `FLAGS ?= $(FAST_FLAGS)`. The promoted line enables audio, direct audio
+ring fill, diagnostic logging, fast OAM DMA, batch-16 CPU slices, direct CPU memory I/O,
+fast absolute-JMP fetch, lazy cycle accounting, and the narrow BNE/BPL/BEQ fast paths.
+
+Runtime menu:
+
+- ROM picker menu: `Frameskip`, `Show FPS`
+- In-game menu: `ROM Picker`, `Frameskip`, `Show FPS`
+
+`Frameskip` is now user-facing and means "how many frames to skip between draws":
+
+| Menu value | Meaning |
+|---:|---|
+| 0 | draw every frame |
+| 1 | skip one frame between draws; default |
+| 2 | skip two frames between draws |
+
+Historical notes below often use the old compile-time `FRAME_SKIP=N` terminology, where
+`FRAME_SKIP=2` meant a draw interval of two frames. That old `FRAME_SKIP=2` behavior maps
+to the current menu value `Frameskip=1`.
+
+`Show FPS` defaults on and uses Playdate's native `drawFPS(0, 0)`. For clean performance
+measurements, turn it off unless the native HUD is the thing being checked. When FPS is
+off, skipped visual frames return `0` from the update callback and avoid a full LCD update.
+When FPS is on, only the top rows needed by the native counter are marked dirty on skipped
+visual frames.
+
+Start and Select are crank controls now, not menu items: crank undocked below 60 degrees
+holds Select; crank undocked above 180 degrees holds Start.
+
+---
+
 ## Hardware
 
 | | |
@@ -45,9 +80,10 @@ cause HardFault on device and segfault on simulator.
 
 ---
 
-## Current best baseline — 2026-05-22
+## Historical baseline — 2026-05-22
 
-Scene: Mario 1-1, standing still, no enemies visible. `FRAME_SKIP=2`, `AUDIO=ON`, `DIAG=ON`.
+Scene: Mario 1-1, standing still, no enemies visible. Old hardcoded `FRAME_SKIP=2`
+(current menu `Frameskip=1` equivalent), `AUDIO=ON`, `DIAG=ON`.
 
 | Scenario | fps | avg | cpu_only | ppu_full |
 |---|---:|---:|---:|---:|
@@ -101,9 +137,10 @@ Removed ~62 undocumented opcode cases, replacing them with `ADD_CYCLES(n)` stubs
 `nes6502_execute` shrank further; function fits comfortably in 16 KB I-cache.
 Before: ~34 fps. After: ~43 fps at the time.
 
-### 4. `FRAME_SKIP=2` (`src/osd.c`)
+### 4. Old hardcoded `FRAME_SKIP=2` (`src/osd.c`)
 Alternates render_true / render_false frames. avg = (30+22)/2 = 26 ms → ~38 fps vs 29 fps
-with `FRAME_SKIP=1`. Game logic runs at full NES speed; only pixel output is halved.
+with old `FRAME_SKIP=1`. Game logic runs at full NES speed; only pixel output is halved.
+This is equivalent to the current runtime menu value `Frameskip=1`.
 
 ### 5. `.itcm` section + heap copy (`nes6502_itcm_init`)
 `nes6502_execute`, `mem_readbyte`, `mem_writebyte` are placed in a `.itcm` ELF section.
@@ -409,10 +446,10 @@ Findings:
 ### Skip sprite render cache on skipped frames — regression
 
 `ppu_build_sprite_cache()` precomputes scanline sprite lists and CHR pattern rows for
-visible sprite rendering. `FRAME_SKIP=2` means every other frame intentionally skips that
-rendering, but the cache was still rebuilt at scanline 0 on those skipped frames. The
-skipped frame only uses `ppu_fakeoam()` for the sprite-0 path, which reads raw sprite data
-directly and does not consume the render cache.
+visible sprite rendering. In the old compile-time terminology, `FRAME_SKIP=2` meant every
+other frame intentionally skips that rendering; today that maps to runtime `Frameskip=1`.
+The skipped frame only uses `ppu_fakeoam()` for the sprite-0 path, which reads raw sprite
+data directly and does not consume the render cache.
 
 The experiment rebuilt the sprite render cache only when `draw_flag` was true. The device
 row from `nofrendo-skipcache.pdx` was worse:
@@ -672,7 +709,7 @@ Findings:
   useful later. But the current slowdowns with enemies/items are CPU interpreter/opcode-mix
   problems first.
 
-### 6502 opcode mix profile - pending device row
+### 6502 opcode mix profile - measured diagnostic row
 
 The next diagnostic build keeps the best behavior row (`cpu_batch=16`, `cpu_opt=O3`,
 spin/align off) and adds a per-opcode counter inside the 6502 switch dispatch. Every 60-frame
@@ -1048,8 +1085,9 @@ What changes:
 
 - Diagnostic builds no longer draw Playdate's on-screen FPS HUD by default. Console diag
   logging remains enabled.
-- On skipped visual frames (`FRAME_SKIP=2`, `draw=false`), `playdate_update()` no longer
-  marks the whole LCD dirty and returns `0` so Playdate can skip the display update.
+- On skipped visual frames (old `FRAME_SKIP=2`, current runtime `Frameskip=1`,
+  `draw=false`), `playdate_update()` no longer marks the whole LCD dirty and returns `0`
+  so Playdate can skip the display update.
 - On rendered frames, it still marks the full LCD dirty and returns `1`.
 
 Why it is worth trying:
@@ -1433,7 +1471,8 @@ the sprite render cache on skipped visual frames.
 
 What changes:
 
-- `FRAME_SKIP=2` already means every other NES frame runs with `draw_flag=false`.
+- In the old compile-time terminology, `FRAME_SKIP=2` already means every other NES frame
+  runs with `draw_flag=false`; today that is runtime `Frameskip=1`.
 - Skipped frames still need `ppu_fakeoam()` for sprite-zero status, but they never call
   `ppu_renderoam()` and therefore never read `oam_sl_count`, `oam_sl_idx`, `oam_pat1`, or
   `oam_pat2`.
@@ -1824,7 +1863,7 @@ Build target:
   submitted logs from `42 fps` to `44 fps` without adding visual issues. Promote
   `cpu_fastbpl=on` as the current best baseline.
 
-### BEQ-only fast branch on lazy/BNE/BPL baseline - installed for device test
+### BEQ-only fast branch on lazy/BNE/BPL baseline - promoted in default build
 
 This probe keeps the promoted lazy/BNE/BPL baseline and adds only a `BEQ` fast path. Opcode
 `F0` (`BEQ`) was also frequently present in the historical real-gameplay opcode profiles.
@@ -1849,7 +1888,9 @@ Build target:
 - Installed over the single main device package at `/Volumes/PLAYDATE/Games/nofrendo.pdx`
   on 2026-05-27 after `make _push` hit the mounted-volume permission issue.
 - Verified `pdex.bin` matches the local package and that there is no nested
-  `nofrendo.pdx` directory. Device gameplay result is pending.
+  `nofrendo.pdx` directory.
+- Follow-up default-build work promoted `cpu_fastbeq=on` into `FAST_FLAGS`; the current
+  normal `make` path includes it alongside lazy cycles, BNE, and BPL.
 
 ### Rendered-sprite pattern cache gating - regression
 
@@ -2103,8 +2144,11 @@ data is already hot from per-frame use.
 
 ### FRAME_SKIP arithmetic (historical reference)
 
-This was useful before the `lcd_dirty=draw` fix. It overestimates the present display cost
-because skipped visual frames no longer force a Playdate LCD update.
+This section uses the old compile-time render interval, not the current user-facing menu
+value. Old `FRAME_SKIP=2` maps to current `Frameskip=1`; old `FRAME_SKIP=3` maps to
+current `Frameskip=2`. It was useful before the `lcd_dirty=draw` fix and now overestimates
+the present display cost because skipped visual frames no longer force a Playdate LCD
+update.
 
 With cpu_only = 19 ms and ppu_full = 28 ms, average frame time by skip level:
 
@@ -2117,15 +2161,15 @@ With cpu_only = 19 ms and ppu_full = 28 ms, average frame time by skip level:
 | 8 | 20.1 | ~50 | ~6 |
 
 The old conclusion was that 50 fps required unacceptable visual skipping. The display-update
-skip fix invalidated that conclusion: `FRAME_SKIP=2` is now viable in light windows, and the
-remaining slowdowns are CPU-side.
+skip fix invalidated that conclusion: old `FRAME_SKIP=2` / current `Frameskip=1` is now
+viable in light windows, and the remaining slowdowns are CPU-side.
 
 ---
 
 ## Build commands
 
 ```sh
-make                 # production build (DIAG=ON by default)
+make                 # promoted fast build (DIAG=ON by default)
 make install         # build + push to connected device
 make diag-nobg       # diagnostic build, bg rendering disabled
 make diag-nosprites  # diagnostic build, sprite rendering disabled

@@ -5,6 +5,10 @@ Goal: get the Playdate port to full-speed gameplay first. The immediate target i
 inaccuracies are acceptable while establishing that speed. This document orders
 the work by a mix of feasibility, expected performance boost, and risk.
 
+Status as of 2026-06-06: the main Playdate-port roadmap is complete and the default
+Makefile path now uses the promoted fast profile. This file remains useful as the
+historical speed plan and performance backlog, not as an active product roadmap.
+
 ## Current Baseline
 
 The 50 fps target means one emulated NES frame every 20 ms. Current profiling in
@@ -28,9 +32,9 @@ about 8 ms of PPU pixel work.
 ## Guiding Rule
 
 Do not optimize from intuition anymore. Every item below should be measured on
-device with the same ROM, same `FRAME_SKIP`, same audio setting, and a clean
-production/diagnostic distinction. A 1 ms measurement error is large on this
-hardware, so compare averages over many frames.
+device with the same ROM, same runtime `Frameskip` value, same audio setting, same
+`Show FPS` setting, and a clean production/diagnostic distinction. A 1 ms measurement
+error is large on this hardware, so compare averages over many frames.
 
 ## Playdate-Specific Findings
 
@@ -73,9 +77,9 @@ Do this first:
 
 Measure:
 
-- Production `FRAME_SKIP=1`, `2`, and `3`.
-- Diagnostic `FRAME_SKIP=1`, `2`, and `3`.
-- Confirm `drawFPS` is never present in production.
+- Production runtime `Frameskip=0`, `1`, and `2`.
+- Diagnostic runtime `Frameskip=0`, `1`, and `2`.
+- `Show FPS` off for clean perf rows; on only when checking the native Playdate FPS HUD.
 
 This does not solve native speed, but it prevents chasing fake regressions.
 
@@ -99,11 +103,11 @@ can be compiled or selected at runtime:
 
 Recommended test rows:
 
-- `FRAME_SKIP=1`, `AUDIO=ON`, normal rendering.
-- `FRAME_SKIP=1`, `AUDIO=OFF`, normal rendering.
-- `FRAME_SKIP=1`, sprites off.
-- `FRAME_SKIP=1`, background off.
-- `FRAME_SKIP=999`, draw never true, if that path still runs correctly.
+- `Frameskip=0`, `AUDIO=ON`, normal rendering.
+- `Frameskip=0`, `AUDIO=OFF`, normal rendering.
+- `Frameskip=0`, sprites off.
+- `Frameskip=0`, background off.
+- Forced no-draw path, if that path still runs correctly.
 - Same matrix on at least one NROM ROM and one scrolling/action ROM.
 
 Measure:
@@ -116,12 +120,11 @@ Measure:
 Output should be a table in `PERF.md`. This tells you which branch of the plan
 is actually worth the next week.
 
-Current repo status on 2026-05-22: the audio-off, background-off,
-sprites-off, and blit-off diagnostic builds have matching install targets, and
-their log banner reports the active flags. The normal diagnostic build also has
-`Draw BG` and `Draw Sprites` system-menu checkmarks so a scene can be reached
-before a visual path is cut; the runtime marker belongs in the captured log
-window. Keep the compile-time variants for clean matrix rows. The first
+Current repo status update: the audio-off, background-off, sprites-off, and blit-off
+diagnostic builds have matching install targets, and their log banner reports the active
+flags. The normal runtime menu no longer exposes `Draw BG` or `Draw Sprites`; those
+checkmarks were removed because they polluted real gameplay testing. Keep the compile-time
+variants for clean matrix rows. The first
 audio-off Mario 1-1 traversal reached 49-50 fps in light windows but still fell
 to 28-39 fps in busy windows, so audio off alone does not reach the speed target.
 The no-background boot row drops the steady audio-on PPU delta to about 4 ms;
@@ -280,7 +283,7 @@ Implementation strategy:
 
 Measure:
 
-- `FRAME_SKIP=999` or equivalent no-draw path.
+- Forced no-draw path.
 - Full render path after the CPU gain is confirmed.
 
 This is probably the most important optimization in the whole project.
@@ -456,8 +459,8 @@ Invalidation:
 
 Measure:
 
-- Full render `FRAME_SKIP=1`.
-- Draw-frame-only cost with `FRAME_SKIP=2` or `3`.
+- Full render with runtime `Frameskip=0`.
+- Draw-frame-only cost with runtime `Frameskip=1` or `2`.
 - CHR ROM game and CHR RAM game separately.
 
 This does not raise the no-draw ceiling, so it comes after CPU work.
@@ -609,7 +612,7 @@ For each optimization, update `PERF.md` with:
 - Git commit or patch name.
 - ROM used.
 - Device revision if known.
-- `AUDIO`, `DIAG`, and `FRAME_SKIP` settings.
+- `AUDIO`, `DIAG`, runtime `Frameskip`, and `Show FPS` settings.
 - `nm` output or at least hot symbol addresses and sizes.
 - Full-frame average.
 - Skipped-frame average.

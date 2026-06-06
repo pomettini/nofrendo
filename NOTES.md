@@ -4,6 +4,11 @@ NES emulator (Nofrendo core) port to Playdate. Current performance target: full-
 50 fps PAL-like gameplay first; visual quality and accuracy can trail while speed is
 being established.
 
+Status as of 2026-06-06: the core Playdate port roadmap is complete. The app builds as a
+Playdate `.pdx`, boots into the ROM picker, launches games cleanly, supports audio,
+runtime frameskip/FPS settings, and has a promoted fast default build. Remaining work is
+optional polish or compatibility work, not required for the main roadmap.
+
 ## Target hardware
 
 | | |
@@ -33,41 +38,59 @@ The runtime Playdate menu should not expose background/sprite render toggles. Th
 skew. Use compile-time targets such as `diag-nobg` or `diag-nosprites` only when measuring
 those rows.
 
-Current promoted speed line after the 2026-05-25 Mario 1-1 tests is direct audio fill,
-display dirty-on-draw, direct CPU memory I/O, and safe fast absolute-JMP fetch. Fast branch
-and broad one-byte operand fetches were safe but mixed, so keep them off unless retesting.
-The narrow `diag-fastmemops` load/store specialization was also mixed and is not promoted.
-The `diag-fastbatch` batch-24 timing probe was also mixed and is not promoted. The
-`diag-skipcache` sprite-cache-on-draw-only probe regressed the busy band and is not
-promoted. `diag-fixedcycles` was safe but effectively flat, so do not stack future tests on
-it. `diag-fastoamdma` was safe in Mario 1-1, with no softlocks or enemy weirdness, but did
-not move the worst `cpu_only=25 ms` band enough to promote as the main answer by itself.
-`diag-fpslite` proved the remaining slowdowns are not diagnostic-timer overhead.
-`diag-fastbne` was mixed and is not promoted: it improved some old dips, but regressed
-others. `diag-cycletrim` at 92% was also mixed and is not promoted: it improved some windows
-but added annoying visual glitches and shifted a bad dip later in the level. The gentler
-96% cycle-trim probe had no meaningful visual glitches, but the speed result was still
-mixed: several windows improved, while some earlier busy windows regressed. The middle
-94% cycle-trim probe was not better and had a few minor graphical glitches, so keep
-cycle-trim experiments unpromoted. `diag-jumptable` was visually clean but not a net speed
-win; it regressed important busy stretches, so keep the switch dispatcher as the stable
-line. The next probe is `diag-lazycycles`, which keeps normal timing and switch dispatch
-but avoids writing `cpu.total_cycles` on every opcode, deriving live cycle totals from the
-active slice only when `nes6502_getcycles(false)` asks for them. It has been installed as
-the single main `nofrendo.pdx`; expected banner is `build=2026-05-26 02:39:29` with
-`cpu_cycles=lazy`. Device results make this the new promoted baseline: no visual glitches,
-best subjective smoothness so far, and most Mario 1-1 windows at `49-50 fps`. The next
-probe retests `diag-fastbne` on top of lazy-cycle accounting, because it is timing-safe and
-targets one of the remaining hot opcodes. Device results for `build=2026-05-26 02:47:10`,
-`cpu_cycles=lazy`, `cpu_fastbne=on` show no visual glitches across two Mario 1-1 runs and
-better behavior in the former weak windows. Promote this as the current best baseline. The
-next probe is `diag-fastbpl`, a similarly narrow BPL-only branch fast path layered on top of
-lazy/BNE. It has been built and installed as the single main `nofrendo.pdx`; expected banner
-is `build=2026-05-26 02:58:19`, `cpu_fastbne=on`, `cpu_fastbpl=on`. Device results show no
-visual glitches and a better observed floor (`44 fps`), so promote it. The next probe is
-`diag-fastbeq`, a BEQ-only branch fast path layered on lazy/BNE/BPL. It has been built
-locally and installed as the single main `nofrendo.pdx`; expected device banner is
-`build=2026-05-26 12:46:08`, `cpu_fastbeq=on`. Device gameplay results are pending.
+Current promoted speed line: `FAST_FLAGS` is the default Makefile path via
+`FLAGS ?= $(FAST_FLAGS)`. It starts from `BASE_FLAGS` and adds only the currently promoted
+speed flags, so plain `make`, `make device`, `make sim`, and `make install` stay on the
+fastest known safe build.
+
+Promoted flags and why they are on:
+
+- `CMAKE_BUILD_TYPE=Release` and `NES6502_OPT_LEVEL=O3`: keep the hot emulator code on the
+  measured fast compiler profile.
+- `AUDIO=ON`: ship with APU audio enabled; audio-off is diagnostic only.
+- `AUDIO_DIRECT_RING=ON`: fill the Playdate audio ring directly from the emulator thread,
+  avoiding an extra temporary-buffer copy.
+- `DIAG=ON` and `DIAG_FPS_ONLY=OFF`: keep 60-frame timing logs available in normal test
+  builds, including split `cpu_only` / `ppu_full` metrics.
+- `PPU_BG=ON`, `PPU_SPRITES=ON`, and `PPU_BLIT=ON`: keep normal rendering enabled;
+  `diag-nobg`, `diag-nosprites`, and `diag-noblit` are measurement targets only.
+- `PPU_FAST_OAMDMA=ON`: copy OAM DMA directly from the mapped CPU page while preserving
+  the DMA cycle burn; safe in Mario 1-1 and cheap enough to keep in the promoted stack.
+- `NES_CPU_BATCH_SCANLINES=16`: run the CPU in 16-scanline slices for fewer interpreter
+  entries and less CPU/PPU cache ping-pong. Wider batches broke timing or felt worse.
+- `NES_CPU_CYCLE_PERCENT=100`: keep normal CPU timing. Cycle-trim probes were mixed and
+  caused visual issues at more aggressive settings.
+- `NES6502_DIRECT_MEMIO=ON`: fast-path common CPU memory/I/O access instead of routing
+  everything through the generic handler scan.
+- `NES6502_FAST_JMP_ABS=ON`: optimize hot absolute-JMP operand fetches, useful for idle
+  and wait-loop-heavy NES code.
+- `NES6502_LAZY_CYCLES=ON`: avoid writing `cpu.total_cycles` on every opcode; derive live
+  totals only when the renderer/timing path asks for them.
+- `NES6502_FAST_BNE=ON`, `NES6502_FAST_BPL=ON`, and `NES6502_FAST_BEQ=ON`: narrow,
+  timing-safe branch fast paths promoted after the lazy-cycle baseline.
+
+Rejected or diagnostic-only probes remain off for a reason:
+
+- `NES6502_JUMPTABLE_DISPATCH=ON` was visually safe but not faster than the switch
+  dispatcher in busy Mario windows.
+- `NES_CPU_BATCH_SCANLINES=24/32`, `PPU_FAST_STRIKE=ON`, and pending-line strike-bias
+  experiments caused slow motion, timing risk, or mixed results.
+- `NES_CPU_CYCLE_PERCENT` below 100 was mixed; 92% had visible glitches, 94% was not
+  better, and 96% was visually safer but not a clean speed win.
+- Broad `NES6502_FAST_BRANCHES`, broad operand-byte fetches, `NES6502_FAST_PC_OPS`,
+  `NES6502_FAST_MEMOPS`, hot-op specializations, and contiguous/linear PRG-ROM probes were
+  flat, mixed, or regressed important windows.
+- `PPU_SPRITE_CACHE_DRAW_ONLY=ON` and other sprite-cache gating ideas regressed feel or
+  busy-band timing.
+- `NES_FIXED_SCANLINE_CYCLES=ON`, loop alignment, spin hacks, DTCM/ITCM placement, and
+  global alignment/size experiments did not produce a safe net win.
+
+Runtime defaults: `Frameskip` defaults to `1`, where the user-facing value means "skip
+this many frames between draws." Thus `0` draws every frame, `1` draws every other frame,
+and `2` draws one frame then skips two. `Show FPS` defaults on and uses Playdate's native
+`drawFPS(0, 0)` counter. On skipped visual frames with FPS disabled, the update callback
+returns `0`; with FPS enabled, only the top rows used by the native FPS counter are marked
+dirty.
 
 ## What's here
 
@@ -86,14 +109,19 @@ locally and installed as the single main `nofrendo.pdx`; expected device banner 
 
 **ROM loading.** Startup uses `pd-rom-picker` to browse `.nes` files from `/Shared/Emulation/nes/games/`, then passes the selected path into the existing Nofrendo loader. ROMs are loaded only through the picker.
 
-**Save states.** The Nofrendo statefile API already exists (`nesstate.c`). `statefile_wrapper` stubs it out on NumWorks; on Playdate we can implement it for real using `pd->file->open` with write access.
+**Input.** D-pad maps to NES D-pad, A maps to NES A, and B maps to NES B. Start and Select
+are no longer menu items: with the crank undocked, angle less than 60 degrees holds Select
+and angle greater than 180 degrees holds Start.
+
+**Save states and battery saves.** Save states are removed from scope. SRAM battery saves
+for games such as Zelda are not supported for now.
 
 ## Roadmap
 
 ### Phase 1 — Build system ✓
 - [x] Write `CMakeLists.txt` using the Playdate SDK cmake toolchain (`PlaydateSDK/C_API/buildsupport/setup.cmake`)
 - [x] Wire `src/nofrendo/` sources, include paths, and audio flag (cmake `-DAUDIO=ON`)
-- [ ] Verify it links (even if it crashes at runtime) — blocked on Phase 2
+- [x] Verify it links and produces `nofrendo.pdx`
 
 ### Phase 2 — Minimal platform layer ✓
 New files created in `src/`:
@@ -103,9 +131,9 @@ New files created in `src/`:
 | `main.c` | `eventHandler` entry point; start ROM picker; launch `nofrendo_main` with selected ROM |
 | `osd.c` | `osd_init`, `osd_shutdown`, `osd_main` (calls `main_loop(selected_rom, system_nes)`) |
 | `timing.c` | `osd_installtimer`, `osd_nofrendo_ticks` via `pd->system->getCurrentTimeMilliseconds()` |
-| `sound.c` | `osd_setsound`, `osd_getsoundinfo` stubs (silence until Phase 5) |
-| `stubs.c` | GUI stubs, `vid_*` stubs — same as NumWorks version |
-| `statefile_wrapper.c` | Stub initially (`return NULL` / `return -1`) |
+| `sound.c` | Playdate pull-audio source plus emulator audio ring-buffer plumbing |
+| `stubs.c` | GUI and state stubs for features outside the Playdate scope |
+| `keyboard.c` | Playdate button and crank polling mapped to NES controller events |
 
 Goal: boots to a black screen without crashing.
 
@@ -120,7 +148,8 @@ Note: use `getFrame()` not `getDisplayBufferBitmap()` — the latter is a read-o
 ### Phase 4 — Input ✓
 - [x] Implement `keyboard.c`: poll `pd->system->getButtonState()` each frame
 - [x] Mapping: D-pad → arrows, A → NES A, B → NES B
-- [x] Start / Select wired as Playdate system menu items (`pd->system->addMenuItem`)
+- [x] Start / Select mapped to crank zones: `< 60°` holds Select, `> 180°` holds Start
+- [x] Remove Start / Select Playdate menu items
 
 ### Phase 5 — Audio ✓
 - [x] `-DAUDIO=ON` in Makefile, `sndhrdw/*.c` + `src/nofrendo/sndhrdw` include path added
@@ -137,17 +166,27 @@ Note: use `getFrame()` not `getDisplayBufferBitmap()` — the latter is a read-o
 ### Phase 7 — Performance ✓ (first pass)
 - [x] Fixed `-O3` being overridden by SDK's `-O2`: re-append `-O3` after `include(playdate_game.cmake)`
 - [x] Dithering replaced with branch-free `white4[4][256]` LUT: 8 AND+OR ops per 8 pixels, no comparisons
+- [x] Promoted `FAST_FLAGS` as the default build path
+- [x] Added dirty-on-draw display updates so skipped visual frames do not refresh the full LCD
+- [x] Added runtime `Frameskip` options `0`, `1`, `2`; default `1`
+- [x] Added native Playdate `Show FPS` toggle; default on
 
-Tested at 26 FPS on device (2048.nes). Further gains if needed:
-- Frame-skip: call `nes_renderframe(false)` on frames where `draw_flag` isn't needed (PPU skips bg/sprite fill)
-- Per-file `-Ofast` for `nes6502.c` and `nes_ppu.c` (safe — no FP in those files)
+Early testing was 26 FPS on device with `2048.nes`; later Mario 1-1 performance work is
+tracked in `PERF.md`. Further gains are now perf-backlog work rather than roadmap blockers.
 
 ### Phase 8 — Save states (removed)
 Save states removed from scope. `nesstate.c` and `libsnss/` are excluded from the build;
-`state_save`/`state_load` are stubbed in `stubs.c`. SRAM battery saves (games like Zelda)
-may be added in a post-polish pass using `pd->file->open`.
+`state_save`/`state_load` are stubbed in `stubs.c`. SRAM battery saves are also out of
+scope for now.
 
-### Phase 9 — Polish
-- [ ] Card art (`pdxinfo` launcher image)
-- [ ] `pdxinfo` metadata file (name, author, bundle ID, version)
-- [ ] Menu item for reset / ROM select if multiple ROMs are present
+### Phase 9 — Polish ✓ for core UX
+- [x] `pdxinfo` metadata file (name, author, bundle ID, version)
+- [x] Startup ROM picker via `pd-rom-picker`
+- [x] In-game `ROM Picker` menu item
+- [x] No redundant `ROM Picker` item while already in the picker
+- [x] Menu order: `ROM Picker`, `Frameskip`, `Show FPS` in game; settings only in picker
+- [x] Clear the screen/framebuffer to black before launching a ROM so the picker does not bleed into gameplay
+- [x] Updated `pd-rom-picker` submodule to the latest available version used by this port
+- [x] Card art (`pdxinfo` launcher image)
+- [x] Reset command intentionally left out of scope
+- [x] SRAM battery saves intentionally left unsupported for now

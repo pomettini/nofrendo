@@ -71,3 +71,16 @@ If auto-detection fails, pass the serial port explicitly:
 ```sh
 PORT=/dev/cu.usbmodemXXXX make install
 ```
+
+If `make install` or `make _push` switches the Playdate into data-disk mode but then fails
+with `Permission denied` while writing `Games/nofrendo.pdx`, the package can be copied
+manually after the disk is mounted:
+
+```sh
+diskutil mount /dev/diskXs1
+cp -R nofrendo.pdx/. /Volumes/PLAYDATE/Games/nofrendo.pdx
+dot_clean -m /Volumes/PLAYDATE/Games/nofrendo.pdx
+cmp -s nofrendo.pdx/pdex.bin /Volumes/PLAYDATE/Games/nofrendo.pdx/pdex.bin
+cmp -s nofrendo.pdx/pdxinfo /Volumes/PLAYDATE/Games/nofrendo.pdx/pdxinfo
+diskutil eject /Volumes/PLAYDATE
+```
