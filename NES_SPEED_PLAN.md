@@ -1,12 +1,12 @@
-# Native NES Speed Plan for Playdate
+# Native NES Speed Plan for FamiCrank on Playdate
 
 Goal: get the Playdate port to full-speed gameplay first. The immediate target is
 50 fps PAL-like NES speed; frame skipping, visual artifacts, and emulation
 inaccuracies are acceptable while establishing that speed. This document orders
 the work by a mix of feasibility, expected performance boost, and risk.
 
-Status as of 2026-06-06: the main Playdate-port roadmap is complete and the default
-Makefile path now uses the promoted fast profile. This file remains useful as the
+Status as of 2026-06-06: the main FamiCrank Playdate-port roadmap is complete and the
+default Makefile path now uses the promoted fast profile. This file remains useful as the
 historical speed plan and performance backlog, not as an active product roadmap.
 
 ## Current Baseline

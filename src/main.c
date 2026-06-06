@@ -105,7 +105,7 @@ static void launch_rom(const char *path, void *userdata) {
   clear_screen_to_black();
   install_emulator_menu();
 
-  char *argv[] = {"nofrendo", selected_rom_path};
+  char *argv[] = {"FamiCrank", selected_rom_path};
   int rc = nofrendo_main(2, argv);
   if (rc != 0) {
     pd->system->logToConsole("[rom] failed to launch %s (%d)",

@@ -1,11 +1,11 @@
 # NOTES.md
 
-NES emulator (Nofrendo core) port to Playdate. Current performance target: full-speed
-50 fps PAL-like gameplay first; visual quality and accuracy can trail while speed is
-being established.
+FamiCrank is an NES emulator for Playdate built on the Nofrendo core. Current performance
+target: full-speed 50 fps PAL-like gameplay first; visual quality and accuracy can trail
+while speed is being established.
 
 Status as of 2026-06-06: the core Playdate port roadmap is complete. The app builds as a
-Playdate `.pdx`, boots into the ROM picker, launches games cleanly, supports audio,
+Playdate `FamiCrank.pdx`, boots into the ROM picker, launches games cleanly, supports audio,
 runtime frameskip/FPS settings, and has a promoted fast default build. Remaining work is
 optional polish or compatibility work, not required for the main roadmap.
 
@@ -21,12 +21,12 @@ optional polish or compatibility work, not required for the main roadmap.
 
 ## Device install policy
 
-Always install the current test build as `nofrendo.pdx` on the Playdate. Do not push
-separately named diagnostic copies such as `nofrendo-batchcpu16-...pdx`; keep only one
+Always install the current test build as `FamiCrank.pdx` on the Playdate. Do not push
+separately named diagnostic copies such as `FamiCrank-batchcpu16-...pdx`; keep only one
 on-device copy and let new experiments overwrite it.
 
-The `make _push` helper copies `nofrendo.pdx/.` into the existing device package so it does
-not create a nested `nofrendo.pdx/nofrendo.pdx` folder.
+The `make _push` helper copies `FamiCrank.pdx/.` into the existing device package so it does
+not create a nested `FamiCrank.pdx/FamiCrank.pdx` folder.
 
 Diagnostic performance builds should be log-only unless the on-screen FPS HUD is explicitly
 needed. With frame skipping enabled, skipped visual frames must not mark the whole LCD dirty;
@@ -121,7 +121,7 @@ for games such as Zelda are not supported for now.
 ### Phase 1 — Build system ✓
 - [x] Write `CMakeLists.txt` using the Playdate SDK cmake toolchain (`PlaydateSDK/C_API/buildsupport/setup.cmake`)
 - [x] Wire `src/nofrendo/` sources, include paths, and audio flag (cmake `-DAUDIO=ON`)
-- [x] Verify it links and produces `nofrendo.pdx`
+- [x] Verify it links and produces `FamiCrank.pdx`
 
 ### Phase 2 — Minimal platform layer ✓
 New files created in `src/`:

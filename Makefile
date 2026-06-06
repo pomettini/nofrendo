@@ -7,7 +7,8 @@ PROBE_FLAGS ?= $(BASE_FLAGS)
 PDUTIL    = $(SDK)/bin/pdutil
 PORT      ?= $(shell ls /dev/cu.usbmodem* 2>/dev/null | head -1)
 VOLUME    ?= /Volumes/PLAYDATE
-PDX_DEST  ?= nofrendo.pdx
+PDX_NAME  ?= FamiCrank.pdx
+PDX_DEST  ?= $(PDX_NAME)
 CPU_BATCH ?= 8
 CPU_OPT   ?= O3
 FASTSTRIKE_BATCH ?= 32
@@ -32,7 +33,7 @@ sim:
 	cmake --build build/sim
 
 clean:
-	rm -rf build nofrendo.pdx Source/pdex.elf Source/pdex.dylib
+	rm -rf build FamiCrank.pdx nofrendo.pdx Source/pdex.elf Source/pdex.dylib
 
 rebuild:
 	touch src/*.c && $(MAKE) all
@@ -277,16 +278,16 @@ _push:
 	@echo "Mounting $(PORT)..."
 	$(PDUTIL) $(PORT) datadisk
 	@sleep 3
-	@echo "Copying nofrendo.pdx to $(PDX_DEST)..."
+	@echo "Copying $(PDX_NAME) to $(PDX_DEST)..."
 	mkdir -p $(VOLUME)/Games/$(PDX_DEST)
-	cp -R nofrendo.pdx/. $(VOLUME)/Games/$(PDX_DEST)
+	cp -R $(PDX_NAME)/. $(VOLUME)/Games/$(PDX_DEST)
 	diskutil eject $(VOLUME)
 	@echo "Done. $(PDX_DEST) installed on device."
 
 install: all _push
 
 # Keep the device tidy: every diagnostic install overwrites the single on-device
-# nofrendo.pdx instead of creating separately named test copies.
+# FamiCrank.pdx instead of creating separately named test copies.
 install-diag: diag _push
 install-diag-nobg: diag-nobg _push
 install-diag-nosprites: diag-nosprites _push

@@ -1,6 +1,8 @@
-# Performance Notes — Nofrendo Playdate Port
+# Performance Notes — FamiCrank Playdate Port
 
 Running log of profiling data, findings, and optimization decisions.
+Current package name: `FamiCrank.pdx`. Older rows may mention historical diagnostic package
+names from before the app rename.
 Target: **50 fps** (PAL NES speed). Current best full-level Mario row:
 **~49-50 fps** in light windows, **~37-45 fps** in the remaining slow windows.
 
@@ -256,7 +258,7 @@ The first matrix pass is ready for device logs:
 
 - `diag-nobg`, `diag-nosprites`, `diag-noblit`, and `diag-noaudio` all build locally.
 - Dedicated install targets now build the requested variant and overwrite the single
-  on-device `nofrendo.pdx`. Do not create separately named PDX copies for new tests.
+  on-device `FamiCrank.pdx`. Do not create separately named PDX copies for new tests.
 - The normal diagnostic build no longer exposes runtime BG/sprite render checkmarks. The
   old `Draw BG` and `Draw Sprites` toggles were removed on 2026-05-25 because they made
   gameplay tests too easy to skew. Use `diag-nobg` / `diag-nosprites` only for explicit
@@ -2199,31 +2201,31 @@ make diag-fastbeq   # diagnostic build, fast-path only hot BEQ branch on lazy/BN
 make diag-fixedcycles # diagnostic build, fixed-point scanline cycle accumulator
 make diag-jmpspin    # diagnostic build, self-JMP idle-loop fast-forward enabled
 make diag-linearrom  # diagnostic build, contiguous PRG-ROM fast path enabled
-make install-diag-nobg       # build + push as nofrendo.pdx
-make install-diag-nosprites  # build + push as nofrendo.pdx
-make install-diag-noblit     # build + push as nofrendo.pdx
-make install-diag-noaudio    # build + push as nofrendo.pdx
-make install-diag-opprofile  # build + push as nofrendo.pdx
-make install-diag-fastpc     # build + push as nofrendo.pdx
-make install-diag-faststrike # build + push as nofrendo.pdx
-make install-diag-fastmem    # build + push as nofrendo.pdx
-make install-diag-directmem  # build + push as nofrendo.pdx
-make install-diag-fastjmp    # build + push as nofrendo.pdx
-make install-diag-fastbpl    # build + push as nofrendo.pdx
-make install-diag-fastbeq    # build + push as nofrendo.pdx
-make install-diag-fastbranch # build + push as nofrendo.pdx
-make install-diag-fastopbyte # build + push as nofrendo.pdx
-make install-diag-fastmemops # build + push as nofrendo.pdx
-make install-diag-fastbatch  # build + push as nofrendo.pdx
-make install-diag-skipcache  # build + push as nofrendo.pdx
-make install-diag-fastoamdma # build + push as nofrendo.pdx
-make install-diag-fpslite    # build + push as nofrendo.pdx
-make install-diag-cycletrim  # build + push as nofrendo.pdx
-make install-diag-jumptable  # build + push as nofrendo.pdx
-make install-diag-lazycycles # build + push as nofrendo.pdx
-make install-diag-fastbne    # build + push as nofrendo.pdx
-make install-diag-fixedcycles # build + push as nofrendo.pdx
-make install-diag-jmpspin    # build + push as nofrendo.pdx
-make install-diag-linearrom  # build + push as nofrendo.pdx
+make install-diag-nobg       # build + push as FamiCrank.pdx
+make install-diag-nosprites  # build + push as FamiCrank.pdx
+make install-diag-noblit     # build + push as FamiCrank.pdx
+make install-diag-noaudio    # build + push as FamiCrank.pdx
+make install-diag-opprofile  # build + push as FamiCrank.pdx
+make install-diag-fastpc     # build + push as FamiCrank.pdx
+make install-diag-faststrike # build + push as FamiCrank.pdx
+make install-diag-fastmem    # build + push as FamiCrank.pdx
+make install-diag-directmem  # build + push as FamiCrank.pdx
+make install-diag-fastjmp    # build + push as FamiCrank.pdx
+make install-diag-fastbpl    # build + push as FamiCrank.pdx
+make install-diag-fastbeq    # build + push as FamiCrank.pdx
+make install-diag-fastbranch # build + push as FamiCrank.pdx
+make install-diag-fastopbyte # build + push as FamiCrank.pdx
+make install-diag-fastmemops # build + push as FamiCrank.pdx
+make install-diag-fastbatch  # build + push as FamiCrank.pdx
+make install-diag-skipcache  # build + push as FamiCrank.pdx
+make install-diag-fastoamdma # build + push as FamiCrank.pdx
+make install-diag-fpslite    # build + push as FamiCrank.pdx
+make install-diag-cycletrim  # build + push as FamiCrank.pdx
+make install-diag-jumptable  # build + push as FamiCrank.pdx
+make install-diag-lazycycles # build + push as FamiCrank.pdx
+make install-diag-fastbne    # build + push as FamiCrank.pdx
+make install-diag-fixedcycles # build + push as FamiCrank.pdx
+make install-diag-jmpspin    # build + push as FamiCrank.pdx
+make install-diag-linearrom  # build + push as FamiCrank.pdx
 PORT=/dev/cu.XXX make install   # override auto-detected serial port
 ```

@@ -1,6 +1,6 @@
 # Building
 
-This branch builds a Playdate `.pdx` package.
+This branch builds the FamiCrank Playdate `.pdx` package.
 
 ## Requirements
 
@@ -24,7 +24,7 @@ ROMs are loaded only through the picker.
 
 ```sh
 git submodule update --init --recursive
-make        # promoted performance build: device + simulator + nofrendo.pdx
+make        # promoted performance build: device + simulator + FamiCrank.pdx
 make perf   # alias for the promoted performance build
 make device # promoted performance device binary only
 make sim    # promoted performance simulator binary only
@@ -65,7 +65,7 @@ Connect the Playdate by USB, then run:
 make install
 ```
 
-All install targets overwrite the single on-device `Games/nofrendo.pdx` package. Do not
+All install targets overwrite the single on-device `Games/FamiCrank.pdx` package. Do not
 create separately named diagnostic copies.
 
 If auto-detection fails, pass the serial port explicitly:
@@ -75,14 +75,14 @@ PORT=/dev/cu.usbmodemXXXX make install
 ```
 
 If `make install` or `make _push` switches the Playdate into data-disk mode but then fails
-with `Permission denied` while writing `Games/nofrendo.pdx`, the package can be copied
+with `Permission denied` while writing `Games/FamiCrank.pdx`, the package can be copied
 manually after the disk is mounted:
 
 ```sh
 diskutil mount /dev/diskXs1
-cp -R nofrendo.pdx/. /Volumes/PLAYDATE/Games/nofrendo.pdx
-dot_clean -m /Volumes/PLAYDATE/Games/nofrendo.pdx
-cmp -s nofrendo.pdx/pdex.bin /Volumes/PLAYDATE/Games/nofrendo.pdx/pdex.bin
-cmp -s nofrendo.pdx/pdxinfo /Volumes/PLAYDATE/Games/nofrendo.pdx/pdxinfo
+cp -R FamiCrank.pdx/. /Volumes/PLAYDATE/Games/FamiCrank.pdx
+dot_clean -m /Volumes/PLAYDATE/Games/FamiCrank.pdx
+cmp -s FamiCrank.pdx/pdex.bin /Volumes/PLAYDATE/Games/FamiCrank.pdx/pdex.bin
+cmp -s FamiCrank.pdx/pdxinfo /Volumes/PLAYDATE/Games/FamiCrank.pdx/pdxinfo
 diskutil eject /Volumes/PLAYDATE
 ```
