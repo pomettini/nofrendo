@@ -14,8 +14,14 @@ extern void nes6502_itcm_init(void *(*alloc_fn)(void *, size_t));
 static char selected_rom_path[ROM_PICKER_MAX_PATH];
 static int emulator_started = 0;
 static int return_to_picker_requested = 0;
+static PDMenuItem *frameskip_menu_item = NULL;
+static PDMenuItem *show_fps_menu_item = NULL;
 
 static void start_rom_picker(void);
+extern int osd_get_frame_skip(void);
+extern void osd_set_frame_skip(int skip);
+extern int osd_get_show_fps(void);
+extern void osd_set_show_fps(int enabled);
 
 static void clear_screen_to_black(void) {
   pd->graphics->setDrawMode(kDrawModeCopy);
@@ -34,9 +40,45 @@ static void menu_return_to_picker(void *userdata) {
   return_to_picker_requested = 1;
 }
 
+static void menu_frameskip_changed(void *userdata) {
+  (void)userdata;
+  if (frameskip_menu_item)
+    osd_set_frame_skip(pd->system->getMenuItemValue(frameskip_menu_item));
+}
+
+static void menu_show_fps_changed(void *userdata) {
+  (void)userdata;
+  if (show_fps_menu_item)
+    osd_set_show_fps(pd->system->getMenuItemValue(show_fps_menu_item));
+}
+
+static void clear_menu_handles(void) {
+  frameskip_menu_item = NULL;
+  show_fps_menu_item = NULL;
+}
+
+static void install_settings_menu_items(void) {
+  static const char *frameskip_options[] = {"0", "1", "2"};
+
+  clear_menu_handles();
+
+  frameskip_menu_item = pd->system->addOptionsMenuItem(
+      "Frameskip", frameskip_options,
+      (int)(sizeof(frameskip_options) / sizeof(frameskip_options[0])),
+      menu_frameskip_changed, NULL);
+  if (frameskip_menu_item)
+    pd->system->setMenuItemValue(frameskip_menu_item, osd_get_frame_skip());
+
+  show_fps_menu_item = pd->system->addCheckmarkMenuItem(
+      "Show FPS", osd_get_show_fps(), menu_show_fps_changed, NULL);
+}
+
 static void install_emulator_menu(void) {
   pd->system->removeAllMenuItems();
+  clear_menu_handles();
+
   pd->system->addMenuItem("ROM Picker", menu_return_to_picker, NULL);
+  install_settings_menu_items();
 }
 
 int app_return_to_picker_if_requested(void) {
@@ -82,6 +124,8 @@ static int picker_update(void *userdata) {
 
 static void start_rom_picker(void) {
   pd->system->removeAllMenuItems();
+  clear_menu_handles();
+  install_settings_menu_items();
 
   static const char *extensions[] = {"nes", NULL};
   RomPickerConfig config = {

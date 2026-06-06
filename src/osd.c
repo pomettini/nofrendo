@@ -15,19 +15,45 @@ static char configfilename[] = "nofrendo.cfg";
 extern void sound_fill_buffer(void);
 extern int app_return_to_picker_if_requested(void);
 
-/* Render 1 out of every FRAME_SKIP NES frames. 1 = no skip (full render
-   every frame). 2 = render every other frame (halves PPU pixel cost).
+/* User-facing frame skip: 0 draws every frame; N skips N frames between draws.
    Skipped frames still run the 6502 and PPU state machine at full speed. */
-#define FRAME_SKIP 2
+#define FRAME_SKIP_DEFAULT 1
+#define FRAME_SKIP_MIN 0
+#define FRAME_SKIP_MAX 2
+#define FPS_COUNTER_ROWS 16
 
 static int frame_num = 0;
+static int frame_skip = FRAME_SKIP_DEFAULT;
+static int show_fps = 1;
+
+int osd_get_frame_skip(void) {
+    return frame_skip;
+}
+
+void osd_set_frame_skip(int skip) {
+    if (skip < FRAME_SKIP_MIN)
+        skip = FRAME_SKIP_MIN;
+    if (skip > FRAME_SKIP_MAX)
+        skip = FRAME_SKIP_MAX;
+
+    frame_skip = skip;
+    frame_num = 0;
+}
+
+int osd_get_show_fps(void) {
+    return show_fps;
+}
+
+void osd_set_show_fps(int enabled) {
+    show_fps = enabled ? 1 : 0;
+}
 
 static int playdate_update(void *ud) {
     if (app_return_to_picker_if_requested())
         return 1;
 
     frame_num++;
-    int draw = (frame_num % FRAME_SKIP == 0);
+    int draw = (frame_skip == 0 || (frame_num - 1) % (frame_skip + 1) == 0);
 
     diag_frame_begin();
     diag_render_begin(draw);
@@ -37,17 +63,20 @@ static int playdate_update(void *ud) {
     sound_fill_buffer();
     diag_frame_end();
 
-#ifdef DIAG_DRAW_FPS
-    pd->system->drawFPS(0, 0);
-    pd->graphics->markUpdatedRows(0, LCD_ROWS - 1);
-    return 1;
-#else
+    if (show_fps)
+        pd->system->drawFPS(0, 0);
+
     if (draw) {
         pd->graphics->markUpdatedRows(0, LCD_ROWS - 1);
         return 1;
     }
+
+    if (show_fps) {
+        pd->graphics->markUpdatedRows(0, FPS_COUNTER_ROWS - 1);
+        return 1;
+    }
+
     return 0;
-#endif
 }
 
 void osd_start_emulation(void) {
