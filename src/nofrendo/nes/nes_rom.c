@@ -38,6 +38,7 @@
 #include <osd.h>
 
 extern char *osd_getromdata(const char *name);
+extern unsigned int osd_getromsize(void);
 extern void osd_unloadromdata();
 
 /* Max length for displayed filename */
@@ -159,7 +160,7 @@ static void rom_loadtrainer(unsigned char **rom, rominfo_t *rominfo)
    {
 //      fread(rominfo->sram + TRAINER_OFFSET, TRAINER_LENGTH, 1, fp);
       memcpy(rominfo->sram + TRAINER_OFFSET, *rom, TRAINER_LENGTH);
-      rom+=TRAINER_LENGTH;
+      *rom += TRAINER_LENGTH;
       log_printf("Read in trainer at $7000\n");
    }
 }
@@ -444,19 +445,44 @@ char *rom_getinfo(rominfo_t *rominfo)
 /* Load a ROM image into memory */
 rominfo_t *rom_load(const char *filename)
 {
-   unsigned char *rom=(unsigned char*)osd_getromdata(filename);
+   unsigned char *rom, *rom_base;
    rominfo_t *rominfo;
+   unsigned int rom_size, needed_size;
+
+   if (NULL == filename)
+      return NULL;
+
+   rom=(unsigned char*)osd_getromdata(filename);
+   if (NULL == rom)
+      return NULL;
+
+   rom_base = rom;
+   rom_size = osd_getromsize();
 
    rominfo = malloc(sizeof(rominfo_t));
    if (NULL == rominfo)
+   {
+      osd_unloadromdata();
       return NULL;
+   }
    memset(rominfo, 0, sizeof(rominfo_t));
 
-   strcpy(rominfo->filename, filename);
+   snprintf(rominfo->filename, sizeof(rominfo->filename), "%s", filename);
 
    /* Get the header and stick it into rominfo struct */
-	if (rom_getheader(&rom, rominfo))
+   if (rom_getheader(&rom, rominfo))
       goto _fail;
+
+   needed_size = (unsigned int)(rom - rom_base);
+   if (rominfo->flags & ROM_FLAG_TRAINER)
+      needed_size += TRAINER_LENGTH;
+   needed_size += rominfo->rom_banks * ROM_BANK_LENGTH;
+   needed_size += rominfo->vrom_banks * VROM_BANK_LENGTH;
+   if (rom_size < needed_size)
+   {
+      gui_sendmsg(GUI_RED, "ROM image is truncated");
+      goto _fail;
+   }
 
    /* Make sure we really support the mapper */
    if (false == mmc_peek(rominfo->mapper_number))
@@ -472,9 +498,9 @@ rominfo_t *rom_load(const char *filename)
    if (rom_allocsram(rominfo))
       goto _fail;
 
-      rom_loadtrainer(&rom, rominfo);
+   rom_loadtrainer(&rom, rominfo);
 
-	if (rom_loadrom(&rom, rominfo))
+   if (rom_loadrom(&rom, rominfo))
       goto _fail;
 
    rom_loadsram(rominfo);

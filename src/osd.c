@@ -1,5 +1,6 @@
 #include <pd_api.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include "diag.h"
 #include <noftypes.h>
@@ -124,10 +125,22 @@ int osd_makesnapname(char *filename, int len) {
 
 static char *rom_storage = NULL;
 static char *rom_data = NULL;
+static unsigned int rom_size = 0;
+
+static void clear_rom_storage(void) {
+    free(rom_storage);
+    rom_storage = NULL;
+    rom_data = NULL;
+    rom_size = 0;
+}
 
 char *osd_getromdata(const char *name) {
     FileStat stat;
+    clear_rom_storage();
+
     if (pd->file->stat(name, &stat) != 0)
+        return NULL;
+    if (stat.isdir || stat.size < 16)
         return NULL;
 
 #ifdef ALIGN_PRG_ROM
@@ -154,13 +167,21 @@ char *osd_getromdata(const char *name) {
         return NULL;
     }
 
-    pd->file->read(f, rom_data, stat.size);
+    int bytes_read = pd->file->read(f, rom_data, stat.size);
     pd->file->close(f);
+    if (bytes_read != (int)stat.size) {
+        clear_rom_storage();
+        return NULL;
+    }
+
+    rom_size = stat.size;
     return rom_data;
 }
 
+unsigned int osd_getromsize(void) {
+    return rom_size;
+}
+
 void osd_unloadromdata(void) {
-    free(rom_storage);
-    rom_storage = NULL;
-    rom_data = NULL;
+    clear_rom_storage();
 }

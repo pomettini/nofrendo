@@ -50,8 +50,8 @@ Promoted flags and why they are on:
 - `AUDIO=ON`: ship with APU audio enabled; audio-off is diagnostic only.
 - `AUDIO_DIRECT_RING=ON`: fill the Playdate audio ring directly from the emulator thread,
   avoiding an extra temporary-buffer copy.
-- `DIAG=ON` and `DIAG_FPS_ONLY=OFF`: keep 60-frame timing logs available in normal test
-  builds, including split `cpu_only` / `ppu_full` metrics.
+- `DIAG=OFF`: keep the default package on the fastest clean path. Timing logs are available
+  through explicit diagnostic targets such as `diag`, `diag-fpslite`, and `diag-fastbeq`.
 - `PPU_BG=ON`, `PPU_SPRITES=ON`, and `PPU_BLIT=ON`: keep normal rendering enabled;
   `diag-nobg`, `diag-nosprites`, and `diag-noblit` are measurement targets only.
 - `PPU_FAST_OAMDMA=ON`: copy OAM DMA directly from the mapped CPU page while preserving

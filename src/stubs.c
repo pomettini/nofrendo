@@ -44,7 +44,7 @@ void vid_flush(void) {}
 int  vid_setmode(int width, int height) { return 0; }
 void vid_shutdown(void) {}
 
-/* Save states removed — SRAM saves deferred to post-polish */
+/* Save states and SRAM battery saves are unsupported for now. */
 void state_setslot(int slot) {}
 int  state_save(void) { return -1; }
 int  state_load(void) { return -1; }

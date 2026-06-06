@@ -533,6 +533,9 @@ static event_t *event_system_table[NUM_SUPPORTED_SYSTEMS] =
 
 void event_init(void)
 {
+   input_reset();
+   kb_input.data = 0;
+   kb_alt_input.data = 0;
    input_register(&kb_input);
    input_register(&kb_alt_input);
 }

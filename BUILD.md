@@ -25,6 +25,7 @@ ROMs are loaded only through the picker.
 ```sh
 git submodule update --init --recursive
 make        # promoted performance build: device + simulator + nofrendo.pdx
+make perf   # alias for the promoted performance build
 make device # promoted performance device binary only
 make sim    # promoted performance simulator binary only
 make clean  # remove build outputs
@@ -33,7 +34,8 @@ make clean  # remove build outputs
 The default `make`, `make device`, `make sim`, and `make install` path must always use the
 current promoted performance line. In the Makefile this is `FLAGS ?= $(FAST_FLAGS)`, which
 currently enables batch-16 CPU slices, direct CPU memory I/O, fast absolute JMP, lazy cycle
-accounting, BNE/BPL/BEQ fast paths, direct audio ring fill, and fast OAM DMA.
+accounting, BNE/BPL/BEQ fast paths, direct audio ring fill, fast OAM DMA, and diagnostics
+off.
 
 Named diagnostic targets use `PROBE_FLAGS` plus their explicit experiment flags so they can
 still measure individual variants against the neutral baseline. Useful probes:

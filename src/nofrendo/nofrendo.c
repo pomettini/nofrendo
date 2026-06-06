@@ -172,7 +172,10 @@ static int internal_insert(const char *filename, system_t type)
          return -1;
       }
       if (nes_insertcart(console.filename, console.machine.nes))
+      {
+         console.machine.nes = NULL;
          return -1;
+      }
 
       vid_setmode(NES_SCREEN_WIDTH, 262);//NES_VISIBLE_HEIGHT);
 
@@ -250,7 +253,10 @@ int main_loop(const char *filename, system_t type)
    while (false == console.quit)
    {
       if (internal_insert(console.nextfilename, console.nexttype))
+      {
+         main_quit();
          return 1;
+      }
    }
 
    return 0;

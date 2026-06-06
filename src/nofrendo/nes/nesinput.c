@@ -152,10 +152,24 @@ uint8 input_get(int types)
    return value;
 }
 
+void input_reset(void)
+{
+   int i;
+
+   for (i = 0; i < MAX_CONTROLLERS; i++)
+      nes_input[i] = NULL;
+
+   active_entries = 0;
+   input_strobe();
+}
+
 /* register an input type */
 void input_register(nesinput_t *input)
 {
    if (NULL == input)
+      return;
+
+   if (active_entries >= MAX_CONTROLLERS)
       return;
 
    nes_input[active_entries] = input;

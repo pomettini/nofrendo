@@ -63,10 +63,10 @@ Feasibility: very high
 Expected boost: 0-2 ms, mostly from avoiding accidental diagnostic overhead
 Risk: very low
 
-During performance work, the current Makefile intentionally keeps `DIAG=ON` so
-device logs are available. Treat those numbers as diagnostic measurements and
-keep every row labeled with its active flags. Before release claims or
-production comparisons, build an explicit `DIAG=OFF` package too.
+During performance work, plain `make` is the clean `DIAG=OFF` package and explicit
+diagnostic targets force `DIAG=ON` when device logs are needed. Treat diagnostic numbers as
+diagnostic measurements and keep every row labeled with its active flags. Compare release
+claims against the default `DIAG=OFF` build.
 
 Do this first:
 
@@ -558,7 +558,7 @@ Measure this only after bigger CPU changes; otherwise it will be lost in noise.
 
 ## Recommended Execution Order
 
-1. Fix `DIAG=OFF` production builds.
+1. Keep `DIAG=OFF` production builds verified.
 2. Add the profiling matrix and commit fresh baseline numbers.
 3. Save `nm` symbol maps and confirm hot-code addresses/sizes.
 4. Shrink and isolate the hot interpreter path.

@@ -10,8 +10,8 @@ Target: **50 fps** (PAL NES speed). Current best full-level Mario row:
 
 The default `make`, `make device`, `make sim`, and `make install` path uses
 `FAST_FLAGS` via `FLAGS ?= $(FAST_FLAGS)`. The promoted line enables audio, direct audio
-ring fill, diagnostic logging, fast OAM DMA, batch-16 CPU slices, direct CPU memory I/O,
-fast absolute-JMP fetch, lazy cycle accounting, and the narrow BNE/BPL/BEQ fast paths.
+ring fill, fast OAM DMA, batch-16 CPU slices, direct CPU memory I/O, fast absolute-JMP
+fetch, lazy cycle accounting, the narrow BNE/BPL/BEQ fast paths, and `DIAG=OFF`.
 
 Runtime menu:
 
@@ -56,9 +56,9 @@ holds Select; crank undocked above 180 degrees holds Start.
 
 ## Profiling method
 
-`DIAG=ON` is now the **default** in `Makefile FLAGS`. The update callback measures each frame
-and logs via `pd->system->logToConsole` every 60 frames. Visible in Playdate Mirror or
-`/Data/System/eventlog.txt` on the device.
+Diagnostic targets force `DIAG=ON`. In those builds the update callback measures each frame
+and logs via `pd->system->logToConsole` every 60 frames. Logs are visible in Playdate Mirror
+or `/Data/System/eventlog.txt` on the device.
 
 **Important**: `diag_render_begin(bool draw_flag)` tracks two categories separately:
 - `cpu_only` = average ms for **render_false** frames (6502 + PPU state, no pixels)
@@ -176,7 +176,8 @@ and consistent across multiple test runs.*
 
 ### 9. Split diag metrics
 `diag_render_begin(bool draw_flag)` tracks cpu_only and ppu_full separately.
-`DIAG=ON` is now the default in `Makefile FLAGS` — always-on, minimal overhead.
+Diagnostic targets use `DIAG=ON`; the default build now keeps diagnostics off for the
+clean performance package.
 
 ---
 
@@ -2169,7 +2170,8 @@ viable in light windows, and the remaining slowdowns are CPU-side.
 ## Build commands
 
 ```sh
-make                 # promoted fast build (DIAG=ON by default)
+make                 # promoted fast build (DIAG=OFF by default)
+make perf            # alias for the promoted fast build
 make install         # build + push to connected device
 make diag-nobg       # diagnostic build, bg rendering disabled
 make diag-nosprites  # diagnostic build, sprite rendering disabled
