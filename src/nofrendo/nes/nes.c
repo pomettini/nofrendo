@@ -494,6 +494,11 @@ void nes_reset(int reset_type)
                (HARD_RESET == reset_type) ? "powered on" : "reset");
 }
 
+#ifdef NES_RAM_DTCM
+/* false when mem_page[0] points into DTCM (not a heap block — never free it) */
+static bool nes_ram_is_heap = true;
+#endif
+
 void nes_destroy(nes_t **machine)
 {
    if (*machine)
@@ -508,7 +513,12 @@ void nes_destroy(nes_t **machine)
       if ((*machine)->cpu)
       {
          if ((*machine)->cpu->mem_page[0])
-            free((*machine)->cpu->mem_page[0]);
+         {
+#ifdef NES_RAM_DTCM
+            if (nes_ram_is_heap)
+#endif
+               free((*machine)->cpu->mem_page[0]);
+         }
          free((*machine)->cpu);
       }
 
@@ -599,7 +609,17 @@ nes_t *nes_create(void)
    memset(machine->cpu, 0, sizeof(nes6502_context));
 
    /* allocate 2kB RAM */
+#ifdef NES_RAM_DTCM
+   {
+      extern uint8 *osd_dtcm_ram_alloc(unsigned int size);
+      machine->cpu->mem_page[0] = osd_dtcm_ram_alloc(NES_RAMSIZE);
+      nes_ram_is_heap = (NULL == machine->cpu->mem_page[0]);
+   }
+   if (nes_ram_is_heap) /* simulator or out-of-range: fall back to heap */
+      machine->cpu->mem_page[0] = malloc(NES_RAMSIZE);
+#else
    machine->cpu->mem_page[0] = malloc(NES_RAMSIZE);
+#endif
    if (NULL == machine->cpu->mem_page[0])
       goto _fail;
 

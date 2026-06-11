@@ -102,8 +102,11 @@ static void menu_return_to_picker(void *userdata) {
 
 static void menu_frameskip_changed(void *userdata) {
   (void)userdata;
-  if (frameskip_menu_item)
-    osd_set_frame_skip(pd->system->getMenuItemValue(frameskip_menu_item));
+  if (frameskip_menu_item) {
+    /* Menu index 0 is "Auto" (osd FRAME_SKIP_AUTO = -1); 1..3 map to fixed 0..2 */
+    int value = pd->system->getMenuItemValue(frameskip_menu_item);
+    osd_set_frame_skip(value - 1);
+  }
 }
 
 static void menu_show_fps_changed(void *userdata) {
@@ -118,7 +121,7 @@ static void clear_menu_handles(void) {
 }
 
 static void install_settings_menu_items(void) {
-  static const char *frameskip_options[] = {"0", "1", "2"};
+  static const char *frameskip_options[] = {"Auto", "0", "1", "2"};
 
   clear_menu_handles();
 
@@ -127,7 +130,8 @@ static void install_settings_menu_items(void) {
       (int)(sizeof(frameskip_options) / sizeof(frameskip_options[0])),
       menu_frameskip_changed, NULL);
   if (frameskip_menu_item)
-    pd->system->setMenuItemValue(frameskip_menu_item, osd_get_frame_skip());
+    pd->system->setMenuItemValue(frameskip_menu_item,
+                                 osd_get_frame_skip() + 1);
 
   show_fps_menu_item = pd->system->addCheckmarkMenuItem(
       "Show FPS", osd_get_show_fps(), menu_show_fps_changed, NULL);

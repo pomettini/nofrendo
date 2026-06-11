@@ -76,6 +76,7 @@ option(PPU_BLIT    "Enable Playdate scanline blit (OFF to measure cost)" ON)
 option(PPU_FAST_STRIKE "Return sprite-zero hit as soon as it is detected" OFF)
 option(PPU_SPRITE_CACHE_DRAW_ONLY "Build the sprite render cache only on drawn frames" OFF)
 option(PPU_FAST_OAMDMA "Copy sprite DMA from mapped CPU memory without 256 helper calls" OFF)
+option(NES_RAM_DTCM "Place the 2KB NES work RAM in the DTCM stack pool instead of heap" OFF)
 option(ALIGN_PRG_ROM "Align iNES PRG ROM start for cache experiments" OFF)
 option(DIAG_CPU_EXEC_TIMING "Time every nes6502_execute call in diagnostic builds" OFF)
 set(NES_CPU_BATCH_SCANLINES "1" CACHE STRING
@@ -100,6 +101,7 @@ option(NES6502_FAST_BEQ "Fast-path only the hot BEQ relative branch" OFF)
 option(NES6502_FAST_BRANCHES "Fast-path taken relative branches with pc_ptr" OFF)
 option(NES6502_FAST_OPERAND_BYTES "Use pc_ptr for one-byte 6502 operand fetches" OFF)
 option(NES6502_FAST_MEMOPS "Hand-specialize hot 6502 memory load/store opcodes" OFF)
+option(NES6502_HOT_CLUSTER "Cluster measured-hot opcode case bodies first in the dispatch switch" OFF)
 option(NES6502_JMP_SPIN "Fast-forward self-JMP idle loops to the end of the CPU slice" OFF)
 option(NES6502_LINEAR_ROM "Fast-path CPU ROM reads when $8000-$FFFF is one contiguous host block" OFF)
 option(NES6502_TCMHOT_PROBE "Relocate tiny 6502 hot-core probes into the Playdate DTCM stack pool" OFF)
@@ -142,6 +144,7 @@ set(GAME_DEFINES
     $<$<BOOL:${PPU_FAST_STRIKE}>:PPU_FAST_STRIKE=1>
     $<$<BOOL:${PPU_SPRITE_CACHE_DRAW_ONLY}>:PPU_SPRITE_CACHE_DRAW_ONLY=1>
     $<$<BOOL:${PPU_FAST_OAMDMA}>:PPU_FAST_OAMDMA=1>
+    $<$<BOOL:${NES_RAM_DTCM}>:NES_RAM_DTCM=1>
     $<$<BOOL:${ALIGN_PRG_ROM}>:ALIGN_PRG_ROM=1>
     $<$<BOOL:${DIAG_CPU_EXEC_TIMING}>:DIAG_CPU_EXEC_TIMING=1>
     NES_CPU_BATCH_SCANLINES=${NES_CPU_BATCH_SCANLINES}
@@ -163,6 +166,7 @@ set(GAME_DEFINES
     $<$<BOOL:${NES6502_FAST_BRANCHES}>:NES6502_FAST_BRANCHES=1>
     $<$<BOOL:${NES6502_FAST_OPERAND_BYTES}>:NES6502_FAST_OPERAND_BYTES=1>
     $<$<BOOL:${NES6502_FAST_MEMOPS}>:NES6502_FAST_MEMOPS=1>
+    $<$<BOOL:${NES6502_HOT_CLUSTER}>:NES6502_HOT_CLUSTER=1>
     $<$<BOOL:${NES6502_JMP_SPIN}>:NES6502_JMP_SPIN=1>
     $<$<BOOL:${NES6502_LINEAR_ROM}>:NES6502_LINEAR_ROM=1>
     $<$<BOOL:${NES6502_TCMHOT_PROBE}>:NES6502_TCMHOT_PROBE=1>

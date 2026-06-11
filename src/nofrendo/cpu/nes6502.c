@@ -2441,6 +2441,144 @@ int nes6502_execute(int timeslice_cycles)
 #endif /* NES6502_PC_PTR */
 #endif /* !NES6502_JUMPTABLE */
 
+#ifdef NES6502_HOT_CLUSTER
+      /* Measured-hot opcodes clustered first so their case bodies pack into
+         adjacent I-cache lines (device opcode profiles: 4C/D0/85/C8/C9/99/4A/
+         A5/F0/10 dominate Mario's slow windows; A9/20/60/8D/AD/BD are hot in
+         lighter windows). Bodies are verbatim copies of the #ifndef'd
+         originals below — keep them in sync. */
+      OPCODE_BEGIN(4C)  /* JMP $nnnn */
+#ifdef NES6502_HOTOPS
+         FETCH_PC_WORD_DIRECT(temp);
+         PC = temp;
+         PC_REBASE();
+         ADD_CYCLES(3);
+#else
+         JMP_ABSOLUTE();
+#endif
+         OPCODE_END
+
+      OPCODE_BEGIN(D0)  /* BNE $nnnn */
+#ifdef NES6502_HOTOPS
+         FAST_RELATIVE_BRANCH(0 != z_flag);
+#else
+         BNE();
+#endif
+         OPCODE_END
+
+      OPCODE_BEGIN(F0)  /* BEQ $nnnn */
+#ifdef NES6502_HOTOPS
+         FAST_RELATIVE_BRANCH(0 == z_flag);
+#else
+         BEQ();
+#endif
+         OPCODE_END
+
+      OPCODE_BEGIN(10)  /* BPL $nnnn */
+#ifdef NES6502_HOTOPS
+         FAST_RELATIVE_BRANCH(0 == (n_flag & N_FLAG));
+#else
+         BPL();
+#endif
+         OPCODE_END
+
+      OPCODE_BEGIN(85)  /* STA $nn */
+#if defined(NES6502_HOTOPS) || defined(NES6502_FAST_MEMOPS)
+         FETCH_PC_BYTE_DIRECT(baddr);
+         ZP_WRITEBYTE(baddr, A);
+         ADD_CYCLES(3);
+#else
+         STA(3, ZERO_PAGE_ADDR, ZP_WRITEBYTE, baddr);
+#endif
+         OPCODE_END
+
+      OPCODE_BEGIN(A5)  /* LDA $nn */
+#if defined(NES6502_HOTOPS) || defined(NES6502_FAST_MEMOPS)
+         FETCH_PC_BYTE_DIRECT(baddr);
+         A = ZP_READBYTE(baddr);
+         SET_NZ_FLAGS(A);
+         ADD_CYCLES(3);
+#else
+         LDA(3, ZERO_PAGE_BYTE);
+#endif
+         OPCODE_END
+
+      OPCODE_BEGIN(C8)  /* INY */
+         INY();
+         OPCODE_END
+
+      OPCODE_BEGIN(C9)  /* CMP #$nn */
+#ifdef NES6502_HOTOPS
+         FETCH_PC_BYTE_DIRECT(data);
+         _COMPARE(A, data);
+         ADD_CYCLES(2);
+#else
+         CMP(2, IMMEDIATE_BYTE);
+#endif
+         OPCODE_END
+
+      OPCODE_BEGIN(99)  /* STA $nnnn,Y */
+#if defined(NES6502_HOTOPS) || defined(NES6502_FAST_MEMOPS)
+         FETCH_PC_WORD_DIRECT(addr);
+         addr = (addr + Y) & 0xFFFF;
+         WRITE_FAST_BYTE(addr, A);
+         ADD_CYCLES(5);
+#else
+         STA(5, ABS_IND_Y_ADDR, mem_writebyte, addr);
+#endif
+         OPCODE_END
+
+      OPCODE_BEGIN(4A)  /* LSR A */
+         LSR_A();
+         OPCODE_END
+
+      OPCODE_BEGIN(A9)  /* LDA #$nn */
+         LDA(2, IMMEDIATE_BYTE);
+         OPCODE_END
+
+      OPCODE_BEGIN(20)  /* JSR $nnnn */
+         JSR();
+         OPCODE_END
+
+      OPCODE_BEGIN(60)  /* RTS */
+         RTS();
+         OPCODE_END
+
+      OPCODE_BEGIN(8D)  /* STA $nnnn */
+#if defined(NES6502_HOTOPS) || defined(NES6502_FAST_MEMOPS)
+         FETCH_PC_WORD_DIRECT(addr);
+         WRITE_FAST_BYTE(addr, A);
+         ADD_CYCLES(4);
+#else
+         STA(4, ABSOLUTE_ADDR, mem_writebyte, addr);
+#endif
+         OPCODE_END
+
+      OPCODE_BEGIN(AD)  /* LDA $nnnn */
+#if defined(NES6502_HOTOPS) || defined(NES6502_FAST_MEMOPS)
+         FETCH_PC_WORD_DIRECT(addr);
+         READ_FAST_BYTE(addr, A);
+         SET_NZ_FLAGS(A);
+         ADD_CYCLES(4);
+#else
+         LDA(4, ABSOLUTE_BYTE);
+#endif
+         OPCODE_END
+
+      OPCODE_BEGIN(BD)  /* LDA $nnnn,X */
+#if defined(NES6502_HOTOPS) || defined(NES6502_FAST_MEMOPS)
+         FETCH_PC_WORD_DIRECT(addr);
+         addr = (addr + X) & 0xFFFF;
+         PAGE_CROSS_CHECK(addr, X);
+         READ_FAST_BYTE(addr, A);
+         SET_NZ_FLAGS(A);
+         ADD_CYCLES(4);
+#else
+         LDA(4, ABS_IND_X_BYTE_READ);
+#endif
+         OPCODE_END
+#endif /* NES6502_HOT_CLUSTER */
+
       OPCODE_BEGIN(00)  /* BRK */
          BRK();
          OPCODE_END
@@ -2520,6 +2658,7 @@ int nes6502_execute(int timeslice_cycles)
          SLO(6, ABSOLUTE, mem_writebyte, addr);
          OPCODE_END
 
+#ifndef NES6502_HOT_CLUSTER
       OPCODE_BEGIN(10)  /* BPL $nnnn */
 #ifdef NES6502_HOTOPS
          FAST_RELATIVE_BRANCH(0 == (n_flag & N_FLAG));
@@ -2527,6 +2666,7 @@ int nes6502_execute(int timeslice_cycles)
          BPL();
 #endif
          OPCODE_END
+#endif /* !NES6502_HOT_CLUSTER */
 
       OPCODE_BEGIN(11)  /* ORA ($nn),Y */
          ORA(5, INDIR_Y_BYTE_READ);
@@ -2599,9 +2739,11 @@ int nes6502_execute(int timeslice_cycles)
          SLO(7, ABS_IND_X, mem_writebyte, addr);
          OPCODE_END
 
+#ifndef NES6502_HOT_CLUSTER
       OPCODE_BEGIN(20)  /* JSR $nnnn */
          JSR();
          OPCODE_END
+#endif /* !NES6502_HOT_CLUSTER */
 
       OPCODE_BEGIN(21)  /* AND ($nn,X) */
          AND(6, INDIR_X_BYTE);
@@ -2739,14 +2881,17 @@ int nes6502_execute(int timeslice_cycles)
          EOR(2, IMMEDIATE_BYTE);
          OPCODE_END
 
+#ifndef NES6502_HOT_CLUSTER
       OPCODE_BEGIN(4A)  /* LSR A */
          LSR_A();
          OPCODE_END
+#endif /* !NES6502_HOT_CLUSTER */
 
       OPCODE_BEGIN(4B)  /* ASR #$nn */
          ASR(2, IMMEDIATE_BYTE);
          OPCODE_END
 
+#ifndef NES6502_HOT_CLUSTER
       OPCODE_BEGIN(4C)  /* JMP $nnnn */
 #ifdef NES6502_HOTOPS
          FETCH_PC_WORD_DIRECT(temp);
@@ -2757,6 +2902,7 @@ int nes6502_execute(int timeslice_cycles)
          JMP_ABSOLUTE();
 #endif
          OPCODE_END
+#endif /* !NES6502_HOT_CLUSTER */
 
       OPCODE_BEGIN(4D)  /* EOR $nnnn */
          EOR(4, ABSOLUTE_BYTE);
@@ -2818,9 +2964,11 @@ int nes6502_execute(int timeslice_cycles)
          SRE(7, ABS_IND_X, mem_writebyte, addr);
          OPCODE_END
 
+#ifndef NES6502_HOT_CLUSTER
       OPCODE_BEGIN(60)  /* RTS */
          RTS();
          OPCODE_END
+#endif /* !NES6502_HOT_CLUSTER */
 
       OPCODE_BEGIN(61)  /* ADC ($nn,X) */
          ADC(6, INDIR_X_BYTE);
@@ -2942,6 +3090,7 @@ int nes6502_execute(int timeslice_cycles)
          STY(3, ZERO_PAGE_ADDR, ZP_WRITEBYTE, baddr);
          OPCODE_END
 
+#ifndef NES6502_HOT_CLUSTER
       OPCODE_BEGIN(85)  /* STA $nn */
 #if defined(NES6502_HOTOPS) || defined(NES6502_FAST_MEMOPS)
          FETCH_PC_BYTE_DIRECT(baddr);
@@ -2951,6 +3100,7 @@ int nes6502_execute(int timeslice_cycles)
          STA(3, ZERO_PAGE_ADDR, ZP_WRITEBYTE, baddr);
 #endif
          OPCODE_END
+#endif /* !NES6502_HOT_CLUSTER */
 
       OPCODE_BEGIN(86)  /* STX $nn */
          STX(3, ZERO_PAGE_ADDR, ZP_WRITEBYTE, baddr);
@@ -2976,6 +3126,7 @@ int nes6502_execute(int timeslice_cycles)
          STY(4, ABSOLUTE_ADDR, mem_writebyte, addr);
          OPCODE_END
 
+#ifndef NES6502_HOT_CLUSTER
       OPCODE_BEGIN(8D)  /* STA $nnnn */
 #if defined(NES6502_HOTOPS) || defined(NES6502_FAST_MEMOPS)
          FETCH_PC_WORD_DIRECT(addr);
@@ -2985,6 +3136,7 @@ int nes6502_execute(int timeslice_cycles)
          STA(4, ABSOLUTE_ADDR, mem_writebyte, addr);
 #endif
          OPCODE_END
+#endif /* !NES6502_HOT_CLUSTER */
 
       OPCODE_BEGIN(8E)  /* STX $nnnn */
          STX(4, ABSOLUTE_ADDR, mem_writebyte, addr);
@@ -3026,6 +3178,7 @@ int nes6502_execute(int timeslice_cycles)
          TYA();
          OPCODE_END
 
+#ifndef NES6502_HOT_CLUSTER
       OPCODE_BEGIN(99)  /* STA $nnnn,Y */
 #if defined(NES6502_HOTOPS) || defined(NES6502_FAST_MEMOPS)
          FETCH_PC_WORD_DIRECT(addr);
@@ -3036,6 +3189,7 @@ int nes6502_execute(int timeslice_cycles)
          STA(5, ABS_IND_Y_ADDR, mem_writebyte, addr);
 #endif
          OPCODE_END
+#endif /* !NES6502_HOT_CLUSTER */
 
       OPCODE_BEGIN(9A)  /* TXS */
          TXS();
@@ -3081,6 +3235,7 @@ int nes6502_execute(int timeslice_cycles)
          LDY(3, ZERO_PAGE_BYTE);
          OPCODE_END
 
+#ifndef NES6502_HOT_CLUSTER
       OPCODE_BEGIN(A5)  /* LDA $nn */
 #if defined(NES6502_HOTOPS) || defined(NES6502_FAST_MEMOPS)
          FETCH_PC_BYTE_DIRECT(baddr);
@@ -3091,6 +3246,7 @@ int nes6502_execute(int timeslice_cycles)
          LDA(3, ZERO_PAGE_BYTE);
 #endif
          OPCODE_END
+#endif /* !NES6502_HOT_CLUSTER */
 
       OPCODE_BEGIN(A6)  /* LDX $nn */
          LDX(3, ZERO_PAGE_BYTE);
@@ -3104,9 +3260,11 @@ int nes6502_execute(int timeslice_cycles)
          TAY();
          OPCODE_END
 
+#ifndef NES6502_HOT_CLUSTER
       OPCODE_BEGIN(A9)  /* LDA #$nn */
          LDA(2, IMMEDIATE_BYTE);
          OPCODE_END
+#endif /* !NES6502_HOT_CLUSTER */
 
       OPCODE_BEGIN(AA)  /* TAX */
          TAX();
@@ -3120,6 +3278,7 @@ int nes6502_execute(int timeslice_cycles)
          LDY(4, ABSOLUTE_BYTE);
          OPCODE_END
 
+#ifndef NES6502_HOT_CLUSTER
       OPCODE_BEGIN(AD)  /* LDA $nnnn */
 #if defined(NES6502_HOTOPS) || defined(NES6502_FAST_MEMOPS)
          FETCH_PC_WORD_DIRECT(addr);
@@ -3130,6 +3289,7 @@ int nes6502_execute(int timeslice_cycles)
          LDA(4, ABSOLUTE_BYTE);
 #endif
          OPCODE_END
+#endif /* !NES6502_HOT_CLUSTER */
 
       OPCODE_BEGIN(AE)  /* LDX $nnnn */
          LDX(4, ABSOLUTE_BYTE);
@@ -3187,6 +3347,7 @@ int nes6502_execute(int timeslice_cycles)
          LDY(4, ABS_IND_X_BYTE_READ);
          OPCODE_END
 
+#ifndef NES6502_HOT_CLUSTER
       OPCODE_BEGIN(BD)  /* LDA $nnnn,X */
 #if defined(NES6502_HOTOPS) || defined(NES6502_FAST_MEMOPS)
          FETCH_PC_WORD_DIRECT(addr);
@@ -3199,6 +3360,7 @@ int nes6502_execute(int timeslice_cycles)
          LDA(4, ABS_IND_X_BYTE_READ);
 #endif
          OPCODE_END
+#endif /* !NES6502_HOT_CLUSTER */
 
       OPCODE_BEGIN(BE)  /* LDX $nnnn,Y */
          LDX(4, ABS_IND_Y_BYTE_READ);
@@ -3236,10 +3398,13 @@ int nes6502_execute(int timeslice_cycles)
          DCP(5, ZERO_PAGE, ZP_WRITEBYTE, baddr);
          OPCODE_END
 
+#ifndef NES6502_HOT_CLUSTER
       OPCODE_BEGIN(C8)  /* INY */
          INY();
          OPCODE_END
+#endif /* !NES6502_HOT_CLUSTER */
 
+#ifndef NES6502_HOT_CLUSTER
       OPCODE_BEGIN(C9)  /* CMP #$nn */
 #ifdef NES6502_HOTOPS
          FETCH_PC_BYTE_DIRECT(data);
@@ -3249,6 +3414,7 @@ int nes6502_execute(int timeslice_cycles)
          CMP(2, IMMEDIATE_BYTE);
 #endif
          OPCODE_END
+#endif /* !NES6502_HOT_CLUSTER */
 
       OPCODE_BEGIN(CA)  /* DEX */
          DEX();
@@ -3274,6 +3440,7 @@ int nes6502_execute(int timeslice_cycles)
          DCP(6, ABSOLUTE, mem_writebyte, addr);
          OPCODE_END
 
+#ifndef NES6502_HOT_CLUSTER
       OPCODE_BEGIN(D0)  /* BNE $nnnn */
 #ifdef NES6502_HOTOPS
          FAST_RELATIVE_BRANCH(0 != z_flag);
@@ -3281,6 +3448,7 @@ int nes6502_execute(int timeslice_cycles)
          BNE();
 #endif
          OPCODE_END
+#endif /* !NES6502_HOT_CLUSTER */
 
       OPCODE_BEGIN(D1)  /* CMP ($nn),Y */
          CMP(5, INDIR_Y_BYTE_READ);
@@ -3383,6 +3551,7 @@ int nes6502_execute(int timeslice_cycles)
          ISB(6, ABSOLUTE, mem_writebyte, addr);
          OPCODE_END
 
+#ifndef NES6502_HOT_CLUSTER
       OPCODE_BEGIN(F0)  /* BEQ $nnnn */
 #ifdef NES6502_HOTOPS
          FAST_RELATIVE_BRANCH(0 == z_flag);
@@ -3390,6 +3559,7 @@ int nes6502_execute(int timeslice_cycles)
          BEQ();
 #endif
          OPCODE_END
+#endif /* !NES6502_HOT_CLUSTER */
 
       OPCODE_BEGIN(F1)  /* SBC ($nn),Y */
          SBC(5, INDIR_Y_BYTE_READ);

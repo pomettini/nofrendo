@@ -2329,6 +2329,166 @@ Findings:
 - Keep the older warning about broad hot-op specializations: the promoted bit is only the
   measured memory load/store subset, not the broader `NES6502_HOTOPS` path.
 
+### Adaptive frameskip (Auto) - implemented 2026-06-11, awaiting device row
+
+The remaining Mario 1-1 dips (39-44 fps in enemy/item windows) are interpreter-bound and
+have resisted every narrow CPU optimization since FAST_MEMOPS. Adaptive frameskip attacks
+the ship-blocker directly: it keeps game logic at native speed through the busy windows by
+temporarily reducing visual refresh instead of letting the whole emulation slow down.
+
+What changes (`src/osd.c`, `src/main.c`):
+
+- The Frameskip menu now offers `Auto / 0 / 1 / 2`, with `Auto` as the new default.
+  Menu index 0 maps to `FRAME_SKIP_AUTO (-1)` in osd.c; fixed values behave exactly as
+  before (no extra timing calls in fixed mode, so old measurement rows stay comparable).
+- Auto mode runs at the proven base skip 1 and boosts to skip 2 while overloaded.
+- Load detection: EMA (alpha 1/4, 1/16-ms fixed point) of per-frame emulation work
+  (`nes_renderframe` + input + audio fill), measured with two
+  `getCurrentTimeMilliseconds()` calls per frame (shown immaterial by the fpslite row).
+- Boost enters when EMA > 20 ms (PAL budget), exits when EMA < 18 ms AND the boost has
+  held >= 50 frames (~1 s). The hysteresis gap plus minimum hold prevents the visual
+  refresh flapping between 25 and 16 fps on borderline scenes.
+- The draw cadence is a countdown counter reloaded on each drawn frame, so skip-level
+  changes take effect cleanly without double-draw or long-gap artifacts.
+- Diagnostic builds log `[autoskip] 1->2` / `[autoskip] 2->1` transitions to the console.
+
+Expected behavior: light windows unchanged (49-50 fps at skip 1, 25 fps visual). In the
+busy bands the boost converts the former 39-44 fps slowdown into native-speed gameplay at
+~16 fps visual refresh for the duration of the dip.
+
+**Validated on device 2026-06-11 — promoted.** Two rows were measured:
+
+1. First push accidentally used plain `make install-diag`, which builds `PROBE_FLAGS`
+   (everything off, `cpu_batch=1`, table memory I/O). The user immediately reported it
+   playing much worse — banner check caught it. Lesson recorded below; `diag-fast` /
+   `install-diag-fast` targets added for promoted-line validation builds.
+2. The real row (`build=2026-06-11 16:49:05`, full FAST_FLAGS banner + DIAG):
+
+| Segment | fps | avg | cpu_only | ppu_full |
+|---|---:|---:|---:|---:|
+| Whole Mario 1-1 run, all windows | **45-50** | 19-22 ms | 5-17 ms | 10-21 ms |
+| Worst window (frame 1620-1680) | 45 | 21-22 ms | 16-17 ms | 20-21 ms |
+
+Findings:
+
+- Worst-case fps across the entire level rose from 39-44 (fixed skip 1) to **45**. Most
+  windows sit at 48-50. User verdict: "Smoothest game I've ever tried on any emulator on
+  the Playdate" — promoted.
+- The controller behaved correctly: boosts entered under load and exited at/near the
+  minimum hold once load cleared.
+- Tuning flaw found in the row: nearly all boosts fired at EMA 321-328 (20.06-20.5 ms,
+  barely over the 20 ms enter threshold) and exited right at the 50-frame minimum hold —
+  marginal windows flickering into boost. Un-boosted, those windows run 47-49 fps
+  (imperceptible game slowdown); boosted, they cost a second of visible 16 fps refresh.
+  Only the frame-1620 window (EMA 338 = 21.1 ms) genuinely needed boost. The user
+  reported the boosted stretches as visually choppy.
+- Fix applied: `AUTO_BOOST_ENTER_FP` raised from 20 ms to 21 ms (exit stays 18 ms, so
+  the hysteresis gap widened from 2 to 3 ms). Marginal windows no longer boost; real
+  dips still do.
+- Confirmation row (`build=2026-06-11 16:54:57`): boost count dropped from ~13 to ~8
+  per level, and every remaining boost fired at EMA 337-345 (21.1-21.6 ms — genuinely
+  over budget) instead of the marginal 320s. Floor 44-45 fps (one long-boost window at
+  frame 1800), everything else 46-50 fps. Long quiet stretches show zero transitions.
+  User verdict: better than before. **21 ms enter / 18 ms exit / 50-frame hold is the
+  promoted tuning.**
+
+### Makefile target pitfall: `diag` vs `diag-fast`
+
+Plain `make diag` / `make install-diag` builds **`PROBE_FLAGS`** — the neutral
+everything-off configuration for attribution probes (`cpu_batch=1`, `cpu_memio=table`,
+no fast paths, eager cycles). It is roughly 25% slower than the promoted line and must
+never be used to judge release behavior or playability. For release-candidate validation
+with `[diag]`/`[autoskip]` logs, use **`make install-diag-fast`** (FAST_FLAGS + DIAG=ON).
+Always check the banner line before reading a row: the promoted line shows `oamdma=fast
+cpu_batch=16 cpu_cycles=lazy cpu_memio=direct cpu_fastjmp=on cpu_fastbne=on
+cpu_fastbpl=on cpu_fastbeq=on cpu_fastmemops=on`.
+
+### NES work RAM in DTCM - probe built 2026-06-11, awaiting device row
+
+The remaining dips are interpreter-bound, and the opcode profile of the worst windows is
+dominated by zero-page loads/stores, stack traffic, and compares (`85/A5/D0/C8/C9/99/4A`)
+— exactly the opcodes that hit the 2 KB NES work RAM. This probe moves that RAM from a
+heap `malloc` into the DTCM stack pool: every zero-page/stack access becomes zero-wait-state
+and deterministic, and up to 64 D-cache lines are freed for the thrashing 32 KB PRG ROM.
+
+Distinct from two earlier failures: the rejected DTCM row moved the *cpu struct* (already
+cache-hot); the rejected 4 KB bg-tile cache *added* new D-cache pressure. This probe
+relocates existing hot data *out* of the D-cache pool. Data-only, so none of the BL-range /
+relocation hazards that limited code relocation apply.
+
+Mechanism (`osd_dtcm_ram_alloc` in `src/osd.c`, used by `nes_create`):
+
+- Same frame-derived scheme as the validated tcmhot probe: pool top = current stack frame
+  minus 0x2180, block placed at the pool top, 32-byte aligned.
+- Known risk: 2 KB exceeds the Vecx guide's conservative 1328-byte ceiling for that pool.
+  Collision with OS data or deep stack growth would corrupt NES RAM (game state) and show
+  up as immediate, obvious gameplay chaos — making this a cheap pass/fail probe.
+- Falls back to heap (and logs it) when the derived address is outside DTCM; this also
+  covers the simulator. Startup logs `[dtcmram] dest=... size=2048 frame=...`.
+- `nes_destroy` skips `free()` when the RAM is the DTCM block.
+
+Build: `make install-diag-dtcmram` (FAST_FLAGS + DIAG + NES_RAM_DTCM).
+
+**Device result: REJECTED — crash.** Startup logged
+`[dtcmram] dest=0x200071a0 size=2048 frame=0x20009b30` (allocation succeeded), then the
+device hung on a black screen during Mario ROM load until the watchdog killed it.
+
+Findings:
+
+- The 2 KB block spanned 0x200071a0-0x200079a0 — roughly 700 bytes deeper into the pool
+  than the validated 80-byte tcmhot probe (0x20007970-0x200079c0). Something in that
+  deeper region is live during ROM load (file I/O stack depth or OS data), confirming the
+  Vecx guide's ~1328-byte pool ceiling is a hard limit, not conservatism.
+- Conclusion: **the DTCM stack pool cannot host the 2 KB NES RAM.** Any future DTCM data
+  placement must fit within ~1.3 KB total alongside whatever else is relocated there.
+  A partial split (zero page + stack only) is not possible because the core requires
+  `mem_page[0]` to be one contiguous 2 KB block.
+- `NES_RAM_DTCM` stays available as an opt-in probe flag but must remain OFF everywhere.
+  The device was restored to the validated fast-line diag build.
+
+### Hot-opcode case clustering - probe built 2026-06-12, awaiting device row
+
+Layout probe on the promoted fast line: the 16 measured-hot opcode case bodies are
+emitted first in the dispatch switch so they pack into adjacent I-cache lines, instead
+of being scattered across the ~10-13 KB function in numeric opcode order.
+
+- Cluster, hottest first: `4C D0 F0 10 85 A5 C8 C9 99 4A A9 20 60 8D AD BD`
+  (from the 2026-06-06 promoted-line opcode profile plus the always-hot JSR/RTS/LDA#).
+- Mechanism: `NES6502_HOT_CLUSTER` emits verbatim copies of those case blocks right
+  after the switch opens; the originals are `#ifndef`-guarded out. Duplicate-case
+  compile errors guarantee each opcode exists exactly once, so semantics are unchanged.
+- All 16 relocated cases were verified `break`-terminated with no fall-through
+  dependencies on their original neighbors.
+- Banner field: `cpu_hotcluster=on`. Build: `make install-diag-hotcluster`.
+- **cmake cache contamination recurrence**: the first hot-cluster push crashed with a
+  `[dtcmram]` startup line — the rejected `NES_RAM_DTCM=ON` had survived in the cmake
+  cache because the two new options were missing from the `BASE_FLAGS` explicit-OFF
+  list. Rule reaffirmed: **every new cmake option must be added to `BASE_FLAGS` with
+  an explicit OFF** the moment it is created, or it leaks into every later build.
+  Both options are pinned now.
+- Expectation is low: prior layout probes (`-falign-loops`, jumptable dispatch) came
+  back flat or worse. Judge against the 2026-06-11 16:54 Auto-frameskip row; the
+  signal to watch is `cpu_only` in busy windows and the number of `[autoskip]` boosts.
+
+**Device result (`build=2026-06-12 00:19:13`): FLAT — not promoted.**
+
+| Comparison vs 2026-06-11 16:54 baseline | Baseline | Hot cluster |
+|---|---|---|
+| Worst window | 44 fps, avg=22 ms, cpu_only=17 ms | 45 fps, avg=22 ms, cpu_only=17 ms |
+| Busy-window cpu_only | 16-17 ms | 15-17 ms |
+| [autoskip] boosts per level | ~8 | ~9 (same sections, same EMA levels) |
+| Light windows | 49-50 fps | 49-50 fps |
+
+Findings:
+
+- Differences are within the established ±1 fps run-to-run noise. Keep
+  `NES6502_HOT_CLUSTER=OFF`; the flag stays available as a probe.
+- Diagnostic value: this rules out I-cache placement of hot case bodies as the busy-window
+  cost. Together with the DTCM RAM rejection, the remaining 16-17 ms busy-window
+  `cpu_only` is the practical floor of this interpreter on this cache hierarchy.
+- **Release candidate**: promoted fast line + Auto frameskip (21 ms enter / 18 ms exit /
+  50-frame hold). `make install` ships it with DIAG=OFF.
+
 ### Background tile CHR cache — only if DTCM becomes available
 
 The 4 KB `bg_tile_cache[256][8]` approach was tried and **caused regression** (see failures
