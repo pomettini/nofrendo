@@ -25,6 +25,9 @@ Always install the current test build as `FamiCrank.pdx` on the Playdate. Do not
 separately named diagnostic copies such as `FamiCrank-batchcpu16-...pdx`; keep only one
 on-device copy and let new experiments overwrite it.
 
+When sending a test build to the device, copy the package and eject the Playdate. Do not
+launch the app from the toolchain; the tester will launch it and provide serial output.
+
 The `make _push` helper copies `FamiCrank.pdx/.` into the existing device package so it does
 not create a nested `FamiCrank.pdx/FamiCrank.pdx` folder.
 
@@ -68,6 +71,9 @@ Promoted flags and why they are on:
   totals only when the renderer/timing path asks for them.
 - `NES6502_FAST_BNE=ON`, `NES6502_FAST_BPL=ON`, and `NES6502_FAST_BEQ=ON`: narrow,
   timing-safe branch fast paths promoted after the lazy-cycle baseline.
+- `NES6502_FAST_MEMOPS=ON`: hand-specialize the measured hot memory load/store opcodes on
+  the promoted lazy/branch baseline; the current 1-1 row narrows the bad band to one brief
+  dip and recovers quickly.
 
 Rejected or diagnostic-only probes remain off for a reason:
 
@@ -78,12 +84,20 @@ Rejected or diagnostic-only probes remain off for a reason:
 - `NES_CPU_CYCLE_PERCENT` below 100 was mixed; 92% had visible glitches, 94% was not
   better, and 96% was visually safer but not a clean speed win.
 - Broad `NES6502_FAST_BRANCHES`, broad operand-byte fetches, `NES6502_FAST_PC_OPS`,
-  `NES6502_FAST_MEMOPS`, hot-op specializations, and contiguous/linear PRG-ROM probes were
-  flat, mixed, or regressed important windows.
+  broad hot-op specializations, and contiguous/linear PRG-ROM probes were flat, mixed, or
+  regressed important windows.
 - `PPU_SPRITE_CACHE_DRAW_ONLY=ON` and other sprite-cache gating ideas regressed feel or
   busy-band timing.
-- `NES_FIXED_SCANLINE_CYCLES=ON`, loop alignment, spin hacks, DTCM/ITCM placement, and
-  global alignment/size experiments did not produce a safe net win.
+- `NES_FIXED_SCANLINE_CYCLES=ON`, loop alignment, spin hacks, physical ITCM placement,
+  CPU-struct DTCM placement, and global alignment/size experiments did not produce a safe
+  net win.
+- `NES6502_TCMHOT_PROBE=ON` is a diagnostic-only fast-memory proof. It verifies the
+  relocation mechanism with tiny probes before any real emulator hot path is moved.
+- `NES6502_TCMHOT_CORE=ON` is diagnostic-only and currently rejected as a speed row. The
+  first tiny relocated 6502 core activated on device but still dipped to 43 fps in Mario
+  1-1 and added a worse 39 fps window. `diag-tcmstats` showed that after level entry this
+  wrapper handles zero cycles because it is only tried at CPU-slice entry; do not extend
+  this exact shape.
 
 Runtime defaults: `Frameskip` defaults to `1`, where the user-facing value means "skip
 this many frames between draws." Thus `0` draws every frame, `1` draws every other frame,

@@ -385,6 +385,28 @@ Experiments to try:
 - Keep the current linker-script hot-code placement as the baseline before
   testing ITCM.
 
+Current repo status update: `diag-tcmhot` implements and validates the tiny proof stage
+from the Vecx Playdate TCM guide. It collects a `.tcmhot` input section inside the normal
+`.text` output section so loader relocations stay in `.rel.text`, copies the block into
+the DTCM stack pool at init with a manual word loop, clears I-cache, and calls it through
+a Thumb-bit function pointer. The build-time ELF check shows an 80-byte proof block and no
+separate `.tcmhot`/`.rel.tcmhot` output section. Device validation on PDU1-Y024621 passed
+entry execution, relocated global access, and an in-block call from `dest=0x20007970`.
+
+The follow-up `diag-tcmcore` target is the first functional code-relocation experiment. It
+handles only a tiny no-callback 6502 opcode set in DTCM (`INY`, `LSR A`, `CMP #`, `LDA #`,
+`LDA zp`, `STA zp`, `BNE`, `BEQ`, `BPL`) and immediately falls back to the promoted
+interpreter for everything else. Treat it as an attribution probe until device data shows
+whether the DTCM call overhead is worth the saved instruction-fetch cost. Its first device
+ELF check is 608 bytes (`0x2970..0x2bd0`) and contains no calls inside the relocated block.
+Device testing through Mario 1-1 rejected this exact shape as a speed win: the core
+activated, but the run still dipped to 43 fps and added a worse 39 fps window at frame
+1620. The follow-up `diag-tcmstats` target measures per-window DTCM hit/miss and cycle
+share before trying a different relocated-code shape. The stats run showed this wrapper is
+not worth extending: after the first window it reported `hit=0`, `core=0`, and `pct=0` for
+every 60-frame window. The mini-core is only tried at CPU-slice entry and the real game
+work is immediately handled by the fallback interpreter.
+
 DTCM caution:
 
 - Do not assume a universal safe size. Start with a tiny pool, then grow it.
@@ -408,10 +430,11 @@ ITCM experiment:
 Order of experiments:
 
 1. Stack-local copy of one hot struct or scratch buffer.
-2. Persistent DTCM pool with canaries.
-3. Tiny ITCM proof function.
-4. ITCM copy of a small hot helper.
-5. ITCM copy of the reduced CPU hot loop, only after section 3 shrinks it.
+2. Tiny relocated-code proof in DTCM via `diag-tcmhot`.
+3. Persistent DTCM pool with canaries, if moving data instead of code.
+4. DTCM copy of a small hot helper or attribution-only hot-core probe via `diag-tcmcore`.
+5. Broader DTCM copy of a compact CPU hot core, only after the selected opcode group is small
+   enough to stay below the conservative 1328-byte ceiling.
 
 Risks:
 

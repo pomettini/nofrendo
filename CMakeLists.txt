@@ -102,7 +102,13 @@ option(NES6502_FAST_OPERAND_BYTES "Use pc_ptr for one-byte 6502 operand fetches"
 option(NES6502_FAST_MEMOPS "Hand-specialize hot 6502 memory load/store opcodes" OFF)
 option(NES6502_JMP_SPIN "Fast-forward self-JMP idle loops to the end of the CPU slice" OFF)
 option(NES6502_LINEAR_ROM "Fast-path CPU ROM reads when $8000-$FFFF is one contiguous host block" OFF)
+option(NES6502_TCMHOT_PROBE "Relocate tiny 6502 hot-core probes into the Playdate DTCM stack pool" OFF)
+option(NES6502_TCMHOT_CORE "Run a tiny relocated 6502 hot-opcode core before falling back" OFF)
+option(NES6502_TCMHOT_CORE_STATS "Log DTCM hot-core hit/cycle attribution counters" OFF)
 option(NES_FIXED_SCANLINE_CYCLES "Use fixed-point integer scanline cycle accumulation" OFF)
+if (NES6502_TCMHOT_CORE_STATS)
+    set(NES6502_TCMHOT_CORE ON CACHE BOOL "Run a tiny relocated 6502 hot-opcode core before falling back" FORCE)
+endif()
 if (AUDIO)
     file(GLOB AUDIO_SOURCES src/nofrendo/sndhrdw/*.c)
     list(APPEND NOFRENDO_CORE ${AUDIO_SOURCES})
@@ -159,6 +165,9 @@ set(GAME_DEFINES
     $<$<BOOL:${NES6502_FAST_MEMOPS}>:NES6502_FAST_MEMOPS=1>
     $<$<BOOL:${NES6502_JMP_SPIN}>:NES6502_JMP_SPIN=1>
     $<$<BOOL:${NES6502_LINEAR_ROM}>:NES6502_LINEAR_ROM=1>
+    $<$<BOOL:${NES6502_TCMHOT_PROBE}>:NES6502_TCMHOT_PROBE=1>
+    $<$<BOOL:${NES6502_TCMHOT_CORE}>:NES6502_TCMHOT_CORE=1>
+    $<$<BOOL:${NES6502_TCMHOT_CORE_STATS}>:NES6502_TCMHOT_CORE_STATS=1>
     $<$<BOOL:${NES_FIXED_SCANLINE_CYCLES}>:NES_FIXED_SCANLINE_CYCLES=1>
 )
 
@@ -209,6 +218,9 @@ if (TOOLCHAIN STREQUAL "armgcc")
     endif()
     if (NES6502_ALIGN_LOOPS)
         string(APPEND NES6502_COMPILE_FLAGS " -falign-loops=32")
+    endif()
+    if (NES6502_TCMHOT_PROBE OR NES6502_TCMHOT_CORE)
+        string(APPEND NES6502_COMPILE_FLAGS " -mlong-calls -fno-lto")
     endif()
     set_source_files_properties(
         src/nofrendo/cpu/nes6502.c

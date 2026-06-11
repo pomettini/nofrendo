@@ -107,6 +107,65 @@ extern int nes6502_execute(int total_cycles);
    is called from main.c at kEventInit.  nes.c uses this pointer if non-NULL. */
 extern int (*nes6502_execute_ptr)(int total_cycles);
 extern void nes6502_itcm_init(void *(*alloc_fn)(void *, size_t));
+
+#if defined(NES6502_TCMHOT_PROBE) || defined(NES6502_TCMHOT_CORE)
+#define NES6502_TCMHOT_MAX_BYTES 1328u
+#endif
+
+#ifdef NES6502_TCMHOT_PROBE
+#define NES6502_TCMHOT_PROBE_ENTRY_MAGIC  0x11111111u
+#define NES6502_TCMHOT_PROBE_GLOBAL_MAGIC 0x22222222u
+#define NES6502_TCMHOT_PROBE_CALL_MAGIC   0x33333333u
+#define NES6502_TCMHOT_PROBE_ENTRY_RESULT 0x6502C001u
+#define NES6502_TCMHOT_PROBE_GLOBAL_VALUE 0x13579BDFu
+#define NES6502_TCMHOT_PROBE_CALL_RESULT  0x6502C0DEu
+
+typedef struct nes6502_tcmhot_probe_s
+{
+   uint32 source;
+   uint32 dest;
+   uint32 frame;
+   uint32 size;
+   uint32 max_size;
+   uint32 ready;
+   uint32 status;
+} nes6502_tcmhot_probe_t;
+
+extern void nes6502_tcmhot_probe_init(void (*clear_icache)(void), nes6502_tcmhot_probe_t *probe);
+extern uint32 nes6502_tcmhot_probe_call(uint32 magic);
+#endif
+
+#ifdef NES6502_TCMHOT_CORE
+typedef struct nes6502_tcmhot_core_status_s
+{
+   uint32 source;
+   uint32 dest;
+   uint32 frame;
+   uint32 size;
+   uint32 max_size;
+   uint32 ready;
+   uint32 status;
+} nes6502_tcmhot_core_status_t;
+
+extern void nes6502_tcmhot_core_init(void (*clear_icache)(void));
+extern void nes6502_tcmhot_core_get_status(nes6502_tcmhot_core_status_t *status);
+
+#ifdef NES6502_TCMHOT_CORE_STATS
+typedef struct nes6502_tcmhot_core_stats_s
+{
+   uint32 calls;
+   uint32 hit_calls;
+   uint32 miss_calls;
+   uint32 core_cycles;
+   uint32 fallback_cycles;
+   uint32 returned_cycles;
+   uint32 max_core_run;
+} nes6502_tcmhot_core_stats_t;
+
+extern void nes6502_tcmhot_core_stats_snapshot(nes6502_tcmhot_core_stats_t *stats, bool reset);
+#endif
+#endif
+
 extern void nes6502_nmi(void);
 extern void nes6502_irq(void);
 extern uint8 nes6502_getbyte(uint32 address);

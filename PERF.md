@@ -43,6 +43,87 @@ holds Select; crank undocked above 180 degrees holds Start.
 
 ---
 
+## TCM Relocation Probe — 2026-06-06
+
+The Vecx Playdate TCM guide suggests that small hot-code blocks can be copied into the
+unused DTCM stack pool and executed from there, provided the block stays tiny and its input
+section is collected inside the normal `.text` output section so Playdate loader
+relocations land in `.rel.text`.
+
+FamiCrank now has a diagnostic-only proof target:
+
+```sh
+make diag-tcmhot
+make install-diag-tcmhot
+```
+
+The proof is gated behind `NES6502_TCMHOT_PROBE=ON`, which is off in the default
+performance build. It copies a tiny `.tcmhot` probe block into DTCM with a manual
+word-copy loop, clears the I-cache, preserves the Thumb bit on the relocated function
+pointer, and checks three capabilities separately: entry execution, global data access,
+and an in-block function call.
+
+Build-time ELF checks on the device binary:
+
+- `__tcmhot_start=0x2970`, `__tcmhot_end=0x29c0`: 80-byte proof block.
+- `readelf -S` shows `.text` and `.rel.text`, with no separate `.tcmhot` or
+  `.rel.tcmhot` output section.
+- `NES6502_TCMHOT_MAX_BYTES` is capped at 1328 bytes to match the conservative ceiling
+  from the Vecx guide.
+
+Device validation passed on PDU1-Y024621, SDK 3.0.6:
+
+```text
+[tcmhot] status=0 ready=1 size=80 max=1328 src=60002970 dest=20007970 frame=20009b48
+[tcmhot] entry got=6502c001 expected=6502c001 ok=1
+[tcmhot] global got=13579bdf expected=13579bdf ok=1
+[tcmhot] call got=6502c0de expected=6502c0de ok=1
+```
+
+The mechanism is viable for a future compact 6502 hot core. It is not a speed win by
+itself and should not be promoted until a real hot-path row beats the current default.
+
+The next diagnostic target is:
+
+```sh
+make diag-tcmcore
+make install-diag-tcmcore
+```
+
+`diag-tcmcore` keeps the same promoted interpreter as its fallback, but first tries a
+relocated DTCM mini-core for only the safest high-frequency opcodes seen in profiling:
+`INY`, `LSR A`, `CMP #`, `LDA #`, `LDA zp`, `STA zp`, `BNE`, `BEQ`, and `BPL`. The
+diagnostic banner reports `cpu_tcmcore=on`, and startup logs one `[tcmcore]` status line
+with the copied byte count and DTCM destination. The first device ELF check puts the copied
+core at `__tcmhot_start=0x2970`, `__tcmhot_end=0x2bd0`, or 608 bytes, with no calls inside
+the relocated block. This should stay opt-in until a clean Mario 1-1 run shows a real
+improvement over the current frameskip-1 baseline.
+
+Device result from Mario 1-1: `diag-tcmcore` is valid but **not a speed win**. The startup
+status was `status=0 ready=1 size=608 max=1328 src=60002970 dest=20007770`, but the busy
+windows still dipped to `43 fps` at frames 900 and 1560, `44 fps` at frame 1440, and a new
+bad `39 fps` / `avg=25ms` / `cpu_only=22ms` window at frame 1620. Keep it unpromoted.
+
+The next attribution target is:
+
+```sh
+make diag-tcmstats
+make install-diag-tcmstats
+```
+
+`diag-tcmstats` logs the DTCM-core call count, hit/miss count, handled cycles, fallback
+cycles, handled-cycle percentage, and maximum DTCM run for each 60-frame diagnostic window.
+Use it to decide whether the mini-core is rarely reached, exits too quickly, or simply costs
+more than it saves.
+
+Device result from Mario 1-1 with the usual settings answered that question: after the
+first window, every 60-frame window reported `calls=1200 hit=0 miss=1200 core=0 pct=0`.
+Only startup/level-entry had `13` hits for `38` total core cycles. This means the current
+wrapper shape is effectively pure overhead: the normal interpreter handles all real work
+because the relocated mini-core is only tried at CPU-slice entry.
+
+---
+
 ## Hardware
 
 | | |
@@ -2135,6 +2216,118 @@ Build status on 2026-05-25:
   it regressed the mid-level busy stretch. The next probe is `diag-lazycycles`, which keeps
   `cyclepct=100` and switch dispatch while removing the per-opcode `cpu.total_cycles`
   write.
+- `diag-tcmhot` was added as a relocation-mechanism proof, not as a speed row. Test it on
+  device first; only then consider a compact hot-core experiment.
+- `diag-tcmhot` passed on device: entry execution, relocated global access, and an in-block
+  call all returned the expected values from DTCM.
+- `diag-tcmcore` is now the next opt-in measurement build. It handles a deliberately tiny
+  no-callback opcode set in DTCM, then falls back to the normal promoted interpreter for
+  all other opcodes and remaining cycles.
+- `diag-tcmcore` was tested through Mario 1-1 and rejected as a speed row: startup
+  relocation succeeded, but the run still hit `43 fps` busy dips and added a worse
+  `39 fps` window at frame 1620.
+- `diag-tcmstats` was added as the follow-up attribution build to measure how often the
+  tiny DTCM core actually handles cycles before falling back.
+- `diag-tcmstats` confirmed the shape is a dead end: after the first window it handled zero
+  cycles in every Mario 1-1 window (`hit=0`, `core=0`, `pct=0`), so do not extend this
+  slice-entry-only wrapper.
+- `diag-cpusplit` now measures the current promoted fast line plus CPU-exec timing, rather
+  than the older neutral probe line.
+
+### Current promoted-line CPU split retest
+
+The 2026-06-06 `diag-cpusplit` retest used the current promoted line, not the older O3-only
+profile row: direct audio ring fill, dirty-on-draw display updates, fast OAM DMA, direct
+memory I/O, fast absolute `JMP`, lazy cycle accounting, and the promoted narrow
+`BNE`/`BPL`/`BEQ` branch paths. TCM was off.
+
+Device row:
+
+- Submitted banner: `build=2026-06-06 20:58:21`, `cpu_split=on`, `cpu_tcmcore=off`.
+- The row confirms the remaining Mario 1-1 dips are still interpreter-bound. In the worst
+  submitted window, frame 1680 hit `fps=39`, `avg=25 ms`, `cpu_only=22 ms`,
+  `cpu_exec=20 ms`, `cpu_misc=2 ms`, `ppu_full=23 ms`, and `ppu_exec=13 ms`.
+
+| Segment in submitted log | fps | avg | cpu_only | cpu_exec | cpu_misc | ppu_full | ppu_exec |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Early/light windows, frames 60-840 | 49-50 | 19-20 ms | 6-17 ms | 3-15 ms | 2-3 ms | 10-18 ms | 4-10 ms |
+| First busy band, frames 900-1260 | 43-48 | 20-23 ms | 17-21 ms | 15-19 ms | 1-2 ms | 17-21 ms | 10-13 ms |
+| Late busy band, frames 1380-1680 | 39-46 | 21-25 ms | 18-22 ms | 16-20 ms | 2 ms | 18-23 ms | 10-13 ms |
+| Recovery/tail, frames 1740-2520 | 44-50 | 19-22 ms | 12-19 ms | 10-17 ms | 1-3 ms | 15-20 ms | 7-11 ms |
+
+Next measurement: retarget `diag-opprofile` to `FAST_FLAGS` so the opcode profile reflects
+the current promoted interpreter rather than the stale O3-only line. Use that to decide
+whether another narrow opcode path is worth trying, instead of extending the rejected TCM
+slice-entry wrapper.
+
+### Current promoted-line opcode profile retest
+
+The 2026-06-06 `diag-opprofile` retest used the current promoted line plus opcode counters:
+direct audio ring fill, dirty-on-draw display updates, fast OAM DMA, direct memory I/O,
+fast absolute `JMP`, lazy cycle accounting, and the promoted narrow `BNE`/`BPL`/`BEQ`
+branch paths. CPU split timing and TCM were off.
+
+Device row:
+
+- Submitted banner: `build=2026-06-06 21:05:27`, `cpu_prof=opcode`, `cpu_split=off`,
+  `cpu_tcmcore=off`.
+- As expected, the opcode counter slows the build and should not be judged as a playable
+  speed row. It is an attribution row.
+- Worst submitted window: frame 1680 at `fps=30`, `avg=32 ms`, `cpu_only=28 ms`,
+  `ppu_full=30 ms`.
+
+| Window | fps | Top opcode shape |
+|---|---:|---|
+| Fast/idle, frames 180-240 | 50 | `4C` dominates at 499k-544k; real-gameplay opcodes are small |
+| First busy band, frames 420-600 | 39-40 | `4C` drops to 298k-314k; `C8/D0/85/C9/4A/99/A5` rise |
+| Mid busy band, frames 900-1200 | 33-37 | `4C` drops to 219k-264k; `D0/85/C8/C9/4A/A5/F0/99` dominate the rest |
+| Worst late band, frames 1560-1680 | 30-33 | `4C` bottoms at 142k-199k; `85/D0/C8/C9/99/4A/A5` are all hot |
+
+Findings:
+
+- The promoted `4C`, `D0`, `10`, and `F0` paths are still among the highest-count opcodes,
+  but the worst windows now clearly shift toward real gameplay stores, compares, shifts,
+  and zero-page loads.
+- `C8` (`INY`) and `4A` (`LSR A`) are already tiny register-only cases, so there is little
+  obvious safe work there.
+- The largest remaining unpromoted cluster is the memory load/store group: `85`, `99`, and
+  `A5`, with `AD/BD/8D` also present in lighter windows.
+
+Next measurement: retarget `diag-fastmemops` to `FAST_FLAGS` and retest the existing hot
+load/store opcode specialization on top of the current promoted line. The old row was
+measured before lazy cycles and the promoted branch fast paths, so it is stale.
+
+### Fast hot memory opcodes on promoted line - promoted current best
+
+The stale `NES6502_FAST_MEMOPS` row was retested on the current promoted line instead of
+the old directmem/fastjmp-only baseline. This keeps direct audio ring fill, dirty-on-draw
+display updates, fast OAM DMA, direct memory I/O, fast absolute `JMP`, lazy cycle
+accounting, and the promoted narrow `BNE`/`BPL`/`BEQ` branch paths, then adds the hot
+load/store opcode specializations.
+
+Device row:
+
+- Submitted banner: `build=2026-06-06 21:12:05`, `cpu_fastmemops=on`,
+  `cpu_prof=off`, `cpu_split=off`, `cpu_tcmcore=off`.
+- Worst submitted window: frame 1560 at `fps=39`, `avg=25 ms`, `cpu_only=22 ms`,
+  `ppu_full=23 ms`.
+
+| Segment in submitted log | fps | avg | cpu_only | ppu_full |
+|---|---:|---:|---:|---:|
+| Early/light windows, frames 60-720 | 49-50 | 19-20 ms | 6-16 ms | 10-18 ms |
+| First busy band, frames 780-1260 | 44-49 | 20-22 ms | 15-19 ms | 17-20 ms |
+| Late busy band, frames 1380-1620 | 39-46 | 21-25 ms | 18-22 ms | 19-23 ms |
+| Recovery/tail, frames 1680-2400 | 45-50 | 19-21 ms | 12-18 ms | 15-20 ms |
+
+Findings:
+
+- This is a clear improvement over the stale pre-lazy fastmemops row and a better shape
+  than the current promoted-line attribution/profile rows: most of Mario 1-1 sits at
+  `49-50 fps`, and the serious late dip is now a brief frame-1560 trough rather than a
+  long frame-1560-to-1680 band.
+- Promote `NES6502_FAST_MEMOPS=ON` into `FAST_FLAGS`.
+- Keep the older warning about broad hot-op specializations: the promoted bit is only the
+  measured memory load/store subset, not the broader `NES6502_HOTOPS` path.
 
 ### Background tile CHR cache — only if DTCM becomes available
 
@@ -2201,6 +2394,9 @@ make diag-fastbeq   # diagnostic build, fast-path only hot BEQ branch on lazy/BN
 make diag-fixedcycles # diagnostic build, fixed-point scanline cycle accumulator
 make diag-jmpspin    # diagnostic build, self-JMP idle-loop fast-forward enabled
 make diag-linearrom  # diagnostic build, contiguous PRG-ROM fast path enabled
+make diag-tcmhot     # diagnostic build, tiny DTCM relocated-code proof enabled
+make diag-tcmcore    # diagnostic build, tiny DTCM hot-opcode CPU core enabled
+make diag-tcmstats   # diagnostic build, DTCM hot-core attribution counters enabled
 make install-diag-nobg       # build + push as FamiCrank.pdx
 make install-diag-nosprites  # build + push as FamiCrank.pdx
 make install-diag-noblit     # build + push as FamiCrank.pdx
@@ -2227,5 +2423,8 @@ make install-diag-fastbne    # build + push as FamiCrank.pdx
 make install-diag-fixedcycles # build + push as FamiCrank.pdx
 make install-diag-jmpspin    # build + push as FamiCrank.pdx
 make install-diag-linearrom  # build + push as FamiCrank.pdx
+make install-diag-tcmhot     # build + push as FamiCrank.pdx
+make install-diag-tcmcore    # build + push as FamiCrank.pdx
+make install-diag-tcmstats   # build + push as FamiCrank.pdx
 PORT=/dev/cu.XXX make install   # override auto-detected serial port
 ```

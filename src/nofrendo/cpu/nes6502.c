@@ -25,6 +25,7 @@
 
 
 #include <noftypes.h>
+#include <stdint.h>
 #include <string.h>
 #include "nes6502.h"
 #include "dis6502.h"
@@ -1469,6 +1470,111 @@
 /* ITCM-relocated execute pointer — NULL until nes6502_itcm_init() sets it up */
 int (*nes6502_execute_ptr)(int total_cycles) = NULL;
 
+#if defined(NES6502_TCMHOT_PROBE) || defined(NES6502_TCMHOT_CORE)
+#if defined(__ELF__)
+#define NES6502_TCMHOT __attribute__((section(".tcmhot"), noinline, used))
+#else
+#define NES6502_TCMHOT __attribute__((noinline, used))
+#endif
+#endif
+
+#ifdef NES6502_TCMHOT_PROBE
+static volatile uint32 tcmhot_probe_global = NES6502_TCMHOT_PROBE_GLOBAL_VALUE;
+static uint32 (*tcmhot_probe_ptr)(uint32 magic) = NULL;
+
+static uint32 NES6502_TCMHOT tcmhot_probe_callee(void)
+{
+   return NES6502_TCMHOT_PROBE_CALL_RESULT;
+}
+
+static uint32 NES6502_TCMHOT tcmhot_probe_entry(uint32 magic)
+{
+   if (magic == NES6502_TCMHOT_PROBE_ENTRY_MAGIC)
+      return NES6502_TCMHOT_PROBE_ENTRY_RESULT;
+   if (magic == NES6502_TCMHOT_PROBE_GLOBAL_MAGIC)
+      return tcmhot_probe_global;
+   if (magic == NES6502_TCMHOT_PROBE_CALL_MAGIC)
+      return tcmhot_probe_callee();
+
+   return magic ^ 0x6502u;
+}
+
+void nes6502_tcmhot_probe_init(void (*clear_icache)(void), nes6502_tcmhot_probe_t *probe)
+{
+   uintptr_t source, end, size, frame, pool_top, dest, entry_offset;
+   uint32 i;
+   const uint32 *src;
+   volatile uint32 *dst;
+
+   if (NULL == probe)
+      return;
+
+   memset(probe, 0, sizeof(*probe));
+   probe->max_size = NES6502_TCMHOT_MAX_BYTES;
+   tcmhot_probe_ptr = NULL;
+
+#if defined(__ELF__) && defined(TARGET_PLAYDATE)
+   extern char __tcmhot_start[], __tcmhot_end[];
+
+   source = (uintptr_t)__tcmhot_start;
+   end = (uintptr_t)__tcmhot_end;
+   size = end - source;
+   frame = (uintptr_t)__builtin_frame_address(0);
+
+   probe->source = (uint32)source;
+   probe->frame = (uint32)frame;
+   probe->size = (uint32)size;
+
+   if (0 == size || size > NES6502_TCMHOT_MAX_BYTES)
+   {
+      probe->status = 1;
+      return;
+   }
+   if ((size & 3u) != 0)
+   {
+      probe->status = 2;
+      return;
+   }
+
+   pool_top = (frame - 0x2180u) & ~(uintptr_t)0x0f;
+   dest = (pool_top - size) & ~(uintptr_t)0x0f;
+   probe->dest = (uint32)dest;
+
+   if (dest < 0x20000000u || (dest + size) > 0x20010000u)
+   {
+      probe->status = 3;
+      return;
+   }
+
+   src = (const uint32 *)source;
+   dst = (volatile uint32 *)dest;
+   for (i = 0; i < (uint32)(size / 4u); i++)
+      dst[i] = src[i];
+
+   if (clear_icache)
+      clear_icache();
+   __asm volatile ("dsb sy\n\t" "isb sy\n\t" ::: "memory");
+
+   entry_offset = ((uintptr_t)tcmhot_probe_entry & ~(uintptr_t)1u) - source;
+   tcmhot_probe_ptr = (uint32 (*)(uint32))((dest + entry_offset) | 1u);
+
+   probe->ready = 1;
+   probe->status = 0;
+#else
+   probe->status = 4;
+   (void)clear_icache;
+#endif
+}
+
+uint32 nes6502_tcmhot_probe_call(uint32 magic)
+{
+   if (NULL == tcmhot_probe_ptr)
+      return 0;
+
+   return tcmhot_probe_ptr(magic);
+}
+#endif
+
 /* internal CPU context */
 static nes6502_context cpu;
 
@@ -1876,6 +1982,258 @@ uint32 nes6502_getcycles(bool reset_flag)
 }
 
 #define  MIN(a,b)    (((a) < (b)) ? (a) : (b))
+
+#ifdef NES6502_TCMHOT_CORE
+static int (*nes6502_execute_fallback_ptr)(int total_cycles) = NULL;
+static int (*tcmhot_core_ptr)(int total_cycles) = NULL;
+static nes6502_tcmhot_core_status_t tcmhot_core_status;
+#ifdef NES6502_TCMHOT_CORE_STATS
+static nes6502_tcmhot_core_stats_t tcmhot_core_stats;
+#endif
+
+static int NES6502_TCMHOT tcmhot_core_execute(int timeslice_cycles)
+{
+   int remaining;
+   int executed;
+   uint32 PC;
+   uint8 A, X, Y, S;
+   uint8 n_flag, v_flag, b_flag;
+   uint8 d_flag, i_flag, z_flag, c_flag;
+   uint8 *pc_ptr, *pc_bank_end;
+   uint8 op, data, btemp, baddr;
+   uint32 temp;
+
+   if (timeslice_cycles <= 0 || cpu.jammed || cpu.burn_cycles || cpu.int_pending)
+      return 0;
+
+   remaining = timeslice_cycles;
+
+#define TCM_REBASE() \
+   do { \
+      pc_ptr = cpu.mem_page[PC >> NES6502_BANKSHIFT] + (PC & NES6502_BANKMASK); \
+      pc_bank_end = cpu.mem_page[PC >> NES6502_BANKSHIFT] + NES6502_BANKSIZE; \
+   } while (0)
+
+#define TCM_SET_NZ(value) \
+   do { \
+      n_flag = z_flag = (uint8)(value); \
+   } while (0)
+
+#define TCM_COMPARE(reg, value) \
+   do { \
+      temp = (uint32)(reg) - (uint32)(value); \
+      c_flag = ((temp & 0x100u) >> 8) ^ 1u; \
+      TCM_SET_NZ((uint8)temp); \
+   } while (0)
+
+#define TCM_FETCH_2() \
+   do { \
+      if (__builtin_expect((pc_bank_end - pc_ptr) < 2, 0)) \
+         goto tcm_done; \
+   } while (0)
+
+#define TCM_BRANCH(condition) \
+   do { \
+      uint32 target; \
+      TCM_FETCH_2(); \
+      pc_ptr++; \
+      PC++; \
+      btemp = *pc_ptr++; \
+      PC++; \
+      if (condition) \
+      { \
+         if (((int8)btemp + (PC & 0x00FF)) & 0x100) \
+            remaining -= 1; \
+         remaining -= 3; \
+         target = (PC + (int8)btemp) & 0xFFFF; \
+         if (__builtin_expect(((PC ^ target) & ~NES6502_BANKMASK) != 0, 0)) \
+         { \
+            PC = target; \
+            TCM_REBASE(); \
+         } \
+         else \
+         { \
+            pc_ptr += (int8)btemp; \
+            PC = target; \
+         } \
+      } \
+      else \
+      { \
+         remaining -= 2; \
+      } \
+   } while (0)
+
+   PC = cpu.pc_reg;
+   A = cpu.a_reg;
+   X = cpu.x_reg;
+   Y = cpu.y_reg;
+   S = cpu.s_reg;
+   n_flag = cpu.p_reg & N_FLAG;
+   v_flag = cpu.p_reg & V_FLAG;
+   b_flag = cpu.p_reg & B_FLAG;
+   d_flag = cpu.p_reg & D_FLAG;
+   i_flag = cpu.p_reg & I_FLAG;
+   z_flag = (0 == (cpu.p_reg & Z_FLAG));
+   c_flag = cpu.p_reg & C_FLAG;
+   TCM_REBASE();
+
+   while (remaining > 0)
+   {
+      if (__builtin_expect(pc_ptr >= pc_bank_end, 0))
+         TCM_REBASE();
+
+      op = *pc_ptr;
+      if (0xC8 == op) /* INY */
+      {
+         pc_ptr++;
+         PC++;
+         Y++;
+         TCM_SET_NZ(Y);
+         remaining -= 2;
+      }
+      else if (0x4A == op) /* LSR A */
+      {
+         pc_ptr++;
+         PC++;
+         c_flag = A & 1u;
+         A >>= 1;
+         TCM_SET_NZ(A);
+         remaining -= 2;
+      }
+      else if (0xC9 == op) /* CMP #$nn */
+      {
+         TCM_FETCH_2();
+         pc_ptr++;
+         PC++;
+         data = *pc_ptr++;
+         PC++;
+         TCM_COMPARE(A, data);
+         remaining -= 2;
+      }
+      else if (0xA9 == op) /* LDA #$nn */
+      {
+         TCM_FETCH_2();
+         pc_ptr++;
+         PC++;
+         A = *pc_ptr++;
+         PC++;
+         TCM_SET_NZ(A);
+         remaining -= 2;
+      }
+      else if (0xA5 == op) /* LDA $nn */
+      {
+         TCM_FETCH_2();
+         pc_ptr++;
+         PC++;
+         baddr = *pc_ptr++;
+         PC++;
+         A = ram[baddr];
+         TCM_SET_NZ(A);
+         remaining -= 3;
+      }
+      else if (0x85 == op) /* STA $nn */
+      {
+         TCM_FETCH_2();
+         pc_ptr++;
+         PC++;
+         baddr = *pc_ptr++;
+         PC++;
+         ram[baddr] = A;
+         remaining -= 3;
+      }
+      else if (0xD0 == op) /* BNE */
+      {
+         TCM_BRANCH(0 != z_flag);
+      }
+      else if (0xF0 == op) /* BEQ */
+      {
+         TCM_BRANCH(0 == z_flag);
+      }
+      else if (0x10 == op) /* BPL */
+      {
+         TCM_BRANCH(0 == (n_flag & N_FLAG));
+      }
+      else
+      {
+         break;
+      }
+   }
+
+tcm_done:
+   executed = timeslice_cycles - remaining;
+   if (executed <= 0)
+      return 0;
+
+   cpu.pc_reg = PC;
+   cpu.a_reg = A;
+   cpu.x_reg = X;
+   cpu.y_reg = Y;
+   cpu.s_reg = S;
+   cpu.p_reg = (n_flag & N_FLAG)
+      | (v_flag ? V_FLAG : 0)
+      | R_FLAG
+      | (b_flag ? B_FLAG : 0)
+      | (d_flag ? D_FLAG : 0)
+      | (i_flag ? I_FLAG : 0)
+      | (z_flag ? 0 : Z_FLAG)
+      | c_flag;
+   cpu.total_cycles += executed;
+
+   return executed;
+
+#undef TCM_BRANCH
+#undef TCM_FETCH_2
+#undef TCM_COMPARE
+#undef TCM_SET_NZ
+#undef TCM_REBASE
+}
+
+static int nes6502_tcmhot_execute(int timeslice_cycles)
+{
+   int done = 0;
+   int fallback_done = 0;
+   int (*fallback)(int) = nes6502_execute_fallback_ptr;
+
+   if (NULL == fallback)
+      fallback = nes6502_execute;
+
+#ifdef NES6502_TCMHOT_CORE_STATS
+   tcmhot_core_stats.calls++;
+#endif
+
+   if (tcmhot_core_ptr)
+      done = tcmhot_core_ptr(timeslice_cycles);
+
+#ifdef NES6502_TCMHOT_CORE_STATS
+   if (done > 0)
+   {
+      tcmhot_core_stats.hit_calls++;
+      tcmhot_core_stats.core_cycles += (uint32)done;
+      if ((uint32)done > tcmhot_core_stats.max_core_run)
+         tcmhot_core_stats.max_core_run = (uint32)done;
+   }
+   else
+   {
+      tcmhot_core_stats.miss_calls++;
+   }
+#endif
+
+   if (done < timeslice_cycles)
+   {
+      fallback_done = fallback(timeslice_cycles - done);
+      done += fallback_done;
+   }
+
+#ifdef NES6502_TCMHOT_CORE_STATS
+   if (fallback_done > 0)
+      tcmhot_core_stats.fallback_cycles += (uint32)fallback_done;
+   if (done > 0)
+      tcmhot_core_stats.returned_cycles += (uint32)done;
+#endif
+
+   return done;
+}
+#endif
 
 #ifdef NES6502_JUMPTABLE
 
@@ -3138,6 +3496,83 @@ void nes6502_itcm_init(void *(*alloc_fn)(void *, size_t))
    nes6502_execute_ptr = (int (*)(int))((uintptr_t)dest + fn_offset + 1UL);
 #endif /* __ELF__ */
 }
+
+#ifdef NES6502_TCMHOT_CORE
+void nes6502_tcmhot_core_get_status(nes6502_tcmhot_core_status_t *status)
+{
+   if (status)
+      *status = tcmhot_core_status;
+}
+
+#ifdef NES6502_TCMHOT_CORE_STATS
+void nes6502_tcmhot_core_stats_snapshot(nes6502_tcmhot_core_stats_t *stats, bool reset)
+{
+   if (stats)
+      *stats = tcmhot_core_stats;
+   if (reset)
+      memset(&tcmhot_core_stats, 0, sizeof(tcmhot_core_stats));
+}
+#endif
+
+void nes6502_tcmhot_core_init(void (*clear_icache)(void))
+{
+#if defined(__ELF__) && defined(TARGET_PLAYDATE)
+   extern char __tcmhot_start[], __tcmhot_end[];
+   uintptr_t source, end, size, frame, pool_top, dest, entry_offset;
+   const uint32 *src;
+   volatile uint32 *dst;
+   uint32 i;
+
+   source = (uintptr_t)__tcmhot_start;
+   end = (uintptr_t)__tcmhot_end;
+   size = end - source;
+
+   memset(&tcmhot_core_status, 0, sizeof(tcmhot_core_status));
+   tcmhot_core_status.max_size = NES6502_TCMHOT_MAX_BYTES;
+   tcmhot_core_status.source = (uint32)source;
+   tcmhot_core_status.size = (uint32)size;
+
+   tcmhot_core_ptr = NULL;
+   if (0 == size || size > NES6502_TCMHOT_MAX_BYTES || (size & 3u) != 0)
+   {
+      tcmhot_core_status.status = 1;
+      return;
+   }
+
+   frame = (uintptr_t)__builtin_frame_address(0);
+   pool_top = (frame - 0x2180u) & ~(uintptr_t)0x0f;
+   dest = (pool_top - size) & ~(uintptr_t)0x0f;
+   tcmhot_core_status.frame = (uint32)frame;
+   tcmhot_core_status.dest = (uint32)dest;
+   if (dest < 0x20000000u || (dest + size) > 0x20010000u)
+   {
+      tcmhot_core_status.status = 2;
+      return;
+   }
+
+   src = (const uint32 *)source;
+   dst = (volatile uint32 *)dest;
+   for (i = 0; i < (uint32)(size / 4u); i++)
+      dst[i] = src[i];
+
+   if (clear_icache)
+      clear_icache();
+   __asm volatile ("dsb sy\n\t" "isb sy\n\t" ::: "memory");
+
+   entry_offset = ((uintptr_t)tcmhot_core_execute & ~(uintptr_t)1u) - source;
+   tcmhot_core_ptr = (int (*)(int))((dest + entry_offset) | 1u);
+   nes6502_execute_fallback_ptr = nes6502_execute_ptr ? nes6502_execute_ptr : nes6502_execute;
+   nes6502_execute_ptr = nes6502_tcmhot_execute;
+   tcmhot_core_status.ready = 1;
+   tcmhot_core_status.status = 0;
+#else
+   memset(&tcmhot_core_status, 0, sizeof(tcmhot_core_status));
+   tcmhot_core_status.max_size = NES6502_TCMHOT_MAX_BYTES;
+   tcmhot_core_status.status = 3;
+   (void)clear_icache;
+#endif
+}
+#endif
 
 /* Issue a CPU Reset */
 void nes6502_reset(void)

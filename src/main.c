@@ -23,6 +23,66 @@ extern void osd_set_frame_skip(int skip);
 extern int osd_get_show_fps(void);
 extern void osd_set_show_fps(int enabled);
 
+#if defined(NES6502_TCMHOT_PROBE) || defined(NES6502_TCMHOT_CORE)
+static void drain_console(void) {
+  uint32_t start = pd->system->getCurrentTimeMilliseconds();
+  while (pd->system->getCurrentTimeMilliseconds() - start < 150u) {
+  }
+}
+#endif
+
+#ifdef NES6502_TCMHOT_PROBE
+static void log_tcmhot_probe_result(const char *name, uint32_t got,
+                                    uint32_t expected) {
+  pd->system->logToConsole("[tcmhot] %s got=%08x expected=%08x ok=%u",
+                           name, got, expected, got == expected);
+  drain_console();
+}
+
+static void run_tcmhot_probe(void) {
+  nes6502_tcmhot_probe_t probe;
+  uint32_t result;
+
+  nes6502_tcmhot_probe_init(pd->system->clearICache, &probe);
+  pd->system->logToConsole(
+      "[tcmhot] status=%u ready=%u size=%u max=%u src=%08x dest=%08x frame=%08x",
+      probe.status, probe.ready, probe.size, probe.max_size, probe.source,
+      probe.dest, probe.frame);
+  drain_console();
+
+  if (!probe.ready)
+    return;
+
+  pd->system->logToConsole("[tcmhot] calling entry probe");
+  drain_console();
+  result = nes6502_tcmhot_probe_call(NES6502_TCMHOT_PROBE_ENTRY_MAGIC);
+  log_tcmhot_probe_result("entry", result, NES6502_TCMHOT_PROBE_ENTRY_RESULT);
+
+  pd->system->logToConsole("[tcmhot] calling global probe");
+  drain_console();
+  result = nes6502_tcmhot_probe_call(NES6502_TCMHOT_PROBE_GLOBAL_MAGIC);
+  log_tcmhot_probe_result("global", result, NES6502_TCMHOT_PROBE_GLOBAL_VALUE);
+
+  pd->system->logToConsole("[tcmhot] calling callee probe");
+  drain_console();
+  result = nes6502_tcmhot_probe_call(NES6502_TCMHOT_PROBE_CALL_MAGIC);
+  log_tcmhot_probe_result("call", result, NES6502_TCMHOT_PROBE_CALL_RESULT);
+}
+#endif
+
+#ifdef NES6502_TCMHOT_CORE
+static void log_tcmhot_core_status(void) {
+  nes6502_tcmhot_core_status_t status;
+
+  nes6502_tcmhot_core_get_status(&status);
+  pd->system->logToConsole(
+      "[tcmcore] status=%u ready=%u size=%u max=%u src=%08x dest=%08x frame=%08x",
+      status.status, status.ready, status.size, status.max_size, status.source,
+      status.dest, status.frame);
+  drain_console();
+}
+#endif
+
 static void clear_screen_to_black(void) {
   pd->graphics->setDrawMode(kDrawModeCopy);
   pd->graphics->clear(kColorBlack);
@@ -147,6 +207,13 @@ int eventHandler(PlaydateAPI *playdate, PDSystemEvent event, uint32_t arg) {
     nes6502_itcm_init(
         pd->system
             ->realloc); /* copy execute loop to ITCM before any NES init */
+#ifdef NES6502_TCMHOT_CORE
+    nes6502_tcmhot_core_init(pd->system->clearICache);
+    log_tcmhot_core_status();
+#endif
+#ifdef NES6502_TCMHOT_PROBE
+    run_tcmhot_probe();
+#endif
     start_rom_picker();
   }
   return 0;

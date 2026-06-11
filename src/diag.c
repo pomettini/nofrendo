@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "diag.h"
-#ifdef NES6502_OPPROFILE
+#if defined(NES6502_OPPROFILE) || defined(NES6502_TCMHOT_CORE_STATS)
 #include "nes6502.h"
 #endif
 
@@ -202,6 +202,12 @@ extern PlaydateAPI *pd;
 #define DIAG_CPU_SPLIT "off"
 #endif
 
+#ifdef NES6502_TCMHOT_CORE
+#define DIAG_CPU_TCMCORE "on"
+#else
+#define DIAG_CPU_TCMCORE "off"
+#endif
+
 static uint32_t window_start  = 0;
 #ifndef DIAG_FPS_ONLY
 static uint32_t render_start  = 0;
@@ -230,6 +236,29 @@ static bool     ppu_sprites_enabled = true;
 static const char *diag_onoff(bool enabled) {
     return enabled ? "on" : "off";
 }
+
+#ifdef NES6502_TCMHOT_CORE_STATS
+static void diag_log_tcmcore_stats(void) {
+    nes6502_tcmhot_core_stats_t stats;
+    uint32_t total_cycles;
+    uint32_t core_pct;
+
+    nes6502_tcmhot_core_stats_snapshot(&stats, true);
+    total_cycles = stats.core_cycles + stats.fallback_cycles;
+    core_pct = total_cycles ? (stats.core_cycles * 100u) / total_cycles : 0;
+
+    pd->system->logToConsole(
+        "[tcmcore] calls=%u hit=%u miss=%u core=%u fallback=%u pct=%u max=%u returned=%u",
+        (unsigned int) stats.calls,
+        (unsigned int) stats.hit_calls,
+        (unsigned int) stats.miss_calls,
+        (unsigned int) stats.core_cycles,
+        (unsigned int) stats.fallback_cycles,
+        (unsigned int) core_pct,
+        (unsigned int) stats.max_core_run,
+        (unsigned int) stats.returned_cycles);
+}
+#endif
 
 #ifdef NES6502_OPPROFILE
 static void diag_log_opcode_profile(void) {
@@ -328,6 +357,7 @@ void diag_frame_begin(void) {
                                  " cpu_jmpspin=" DIAG_CPU_JMPSPIN
                                  " cpu_rom=" DIAG_CPU_ROM
                                  " cpu_split=" DIAG_CPU_SPLIT
+                                 " cpu_tcmcore=" DIAG_CPU_TCMCORE
                                  " prg_align=" DIAG_PRG_ALIGN);
         window_start = pd->system->getCurrentTimeMilliseconds();
         initialized  = true;
@@ -429,6 +459,10 @@ void diag_frame_end(void) {
 
 #ifdef NES6502_OPPROFILE
     diag_log_opcode_profile();
+#endif
+
+#ifdef NES6502_TCMHOT_CORE_STATS
+    diag_log_tcmcore_stats();
 #endif
 
 #ifndef DIAG_FPS_ONLY

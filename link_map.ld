@@ -5,13 +5,20 @@ SECTIONS
 {
     .text :
     {
-        /* .itcm section: nes6502_execute marked for ITCM relocation.
-           Placed first in .text so __itcm_start/__itcm_end are easily computed.
-           At runtime, main.c copies this section to physical ITCM (0x00001000). */
+        /* .itcm section: nes6502_execute marked for relocation.
+           Placed first in .text so __itcm_start/__itcm_end are easily computed. */
         . = ALIGN(32);
         __itcm_start = .;
         *(.itcm)
         __itcm_end = .;
+
+        /* Tiny DTCM hot-core probes live in .text so Playdate loader relocs apply. */
+        . = ALIGN(16);
+        __tcmhot_start = .;
+        KEEP(*(.tcmhot))
+        KEEP(*(.tcmhot.*))
+        . = ALIGN(16);
+        __tcmhot_end = .;
 
         /* ppu_scanline still pinned immediately after, cache-line aligned. */
         . = ALIGN(32);

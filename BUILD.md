@@ -34,8 +34,8 @@ make clean  # remove build outputs
 The default `make`, `make device`, `make sim`, and `make install` path must always use the
 current promoted performance line. In the Makefile this is `FLAGS ?= $(FAST_FLAGS)`, which
 currently enables batch-16 CPU slices, direct CPU memory I/O, fast absolute JMP, lazy cycle
-accounting, BNE/BPL/BEQ fast paths, direct audio ring fill, fast OAM DMA, and diagnostics
-off.
+accounting, BNE/BPL/BEQ fast paths, hot memory load/store opcode fast paths, direct audio
+ring fill, fast OAM DMA, and diagnostics off.
 
 Named diagnostic targets use `PROBE_FLAGS` plus their explicit experiment flags so they can
 still measure individual variants against the neutral baseline. Useful probes:
@@ -52,10 +52,24 @@ make diag-fastbpl
 make diag-fastbeq
 make diag-fixedcycles
 make diag-fastjmp
+make diag-tcmhot
+make diag-tcmcore
+make diag-tcmstats
 ```
 
 `diag-cycletrim` defaults to the conservative `CYCLEPCT=96`; override it with
 `CYCLEPCT=94 make diag-cycletrim`.
+
+`diag-tcmhot` is a proof build for Playdate fast-memory code relocation. It keeps the
+production emulator path unchanged, copies only a tiny probe into the DTCM stack pool, and
+prints `[tcmhot]` console lines so the relocation can be verified on device.
+
+`diag-tcmcore` is the first functional DTCM code experiment. It routes a tiny 6502
+hot-opcode core through the relocated block and falls back to the promoted interpreter for
+everything it does not handle. Keep it diagnostic-only until device numbers prove it helps.
+
+`diag-tcmstats` enables the same tiny DTCM core plus per-window attribution counters. Use it
+after a `diag-tcmcore` run regresses or looks suspicious.
 
 ## Install On Device
 
