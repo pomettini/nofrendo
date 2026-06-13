@@ -354,7 +354,15 @@ void nes_renderframe(bool draw_flag)
    int elapsed_cycles;
    mapintf_t *mapintf = nes.mmc->intf;
    int (*execute_cpu)(int) = nes6502_execute_ptr ? nes6502_execute_ptr : nes6502_execute;
+#ifdef NES_IRQ_MAPPER_BATCH
+   /* hblank mappers can batch CPU across IRQ-free scanline stretches IF they
+      expose an IRQ countdown; without it, exact timing still needs batch=1. */
+   int (*irq_countdown)(void) = mapintf->hblank ? mapintf->irq_countdown : NULL;
+   int cpu_batch_lines = (mapintf->hblank && !irq_countdown)
+                             ? 1 : NES_CPU_BATCH_SCANLINES;
+#else
    int cpu_batch_lines = mapintf->hblank ? 1 : NES_CPU_BATCH_SCANLINES;
+#endif
    int pending_cpu_lines = 0;
    int in_vblank = 0;
 
@@ -397,6 +405,22 @@ void nes_renderframe(bool draw_flag)
             mapintf->vblank();
          in_vblank = 1;
       }
+
+#ifdef NES_IRQ_MAPPER_BATCH
+      /* If this hblank will fire the mapper IRQ (countdown <= 1), flush the
+         pending CPU batch FIRST so the CPU has executed exactly through the
+         previous scanline. The IRQ is then injected with correct timing and
+         taken at the start of the next batch — identical to per-scanline
+         (batch=1) behaviour, but only paid at the one IRQ scanline per split
+         instead of all 240 visible lines. */
+      if (irq_countdown && pending_cpu_lines && irq_countdown() <= 1)
+      {
+         EXECUTE_CPU_TIMED(NES_SCANLINE_CYCLES_INT());
+         NES_SCANLINE_CYCLES_SUB(elapsed_cycles);
+         nes_checkfiq(elapsed_cycles);
+         pending_cpu_lines = 0;
+      }
+#endif
 
       if (mapintf->hblank)
          mapintf->hblank(in_vblank);

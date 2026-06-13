@@ -41,12 +41,21 @@ extern int app_return_to_picker_if_requested(void);
 #define AUTO_BOOST_ENTER_FP   (21 << 4)
 #define AUTO_BOOST_EXIT_FP    (18 << 4)
 #define AUTO_BOOST_MIN_FRAMES 50        /* hold boost for >= ~1 s */
+/* Anti-flap: Punch-Out-shaped loads (draw frames over budget, skip frames
+   cheap) sit exactly at the threshold — boosting drives the EMA under the
+   exit line, so the controller flapped 25<->16 fps once a second forever.
+   If a boost re-enters shortly after the last exit, the load is clearly
+   sustained: hold the boost much longer instead of probing every second. */
+#define AUTO_FLAP_WINDOW      120       /* re-entry within ~2.4 s = flap */
+#define AUTO_BOOST_HOLD_LONG  300       /* escalated hold, ~6 s */
 
 static int frame_skip = FRAME_SKIP_DEFAULT;
 static int skip_counter = 0;
 static int32_t auto_ema_fp = AUTO_EMA_INIT_FP;
 static int auto_boosted = 0;
 static int auto_boost_age = 0;
+static int auto_boost_hold = AUTO_BOOST_MIN_FRAMES;
+static int auto_frames_since_exit = 0x7FFF;
 static int show_fps = 1;
 
 int osd_get_frame_skip(void) {
@@ -64,33 +73,98 @@ void osd_set_frame_skip(int skip) {
     auto_ema_fp = AUTO_EMA_INIT_FP;
     auto_boosted = 0;
     auto_boost_age = 0;
+    auto_boost_hold = AUTO_BOOST_MIN_FRAMES;
+    auto_frames_since_exit = 0x7FFF;
 }
 
 #ifdef NES_RAM_DTCM
-/* Hand the NES core a 2KB work-RAM block inside the DTCM stack pool.
-   Same frame-derived scheme the validated tcmhot probe uses: the pool top
-   sits 0x2180 below the current stack frame (max expected further stack
-   growth per the Vecx guide); the block is placed at the pool top, 32-byte
-   aligned. NOTE: 2KB exceeds the guide's conservative 1328-byte ceiling, so
-   this is probe territory — corruption (OS data or deep stack collision)
-   would show up as immediate gameplay chaos. Returns NULL (heap fallback)
-   when the result is outside DTCM, which also covers the simulator. */
+/* Hand the NES core a 2KB work-RAM block inside the DTCM pool.
+   Placement from the 2026-06-12 dtcmscan run: the pool between the firmware
+   data floor (0x200074d0) and the deepest observed stack watermark
+   (0x200095a8 over a full Mario 1-1 with audio) stayed untouched — 8,408
+   bytes. The block sits at the BOTTOM of that pool (64-byte aligned, just
+   above the firmware floor), maximizing distance from stack growth: 6.3 KB
+   of headroom to the observed watermark. The first probe at 0x200071a0
+   crashed because it sat below the firmware floor — placement, not size.
+   On the simulator the fixed address is outside DTCM semantics; the bounds
+   check below never passes there, so it falls back to heap. */
+#define DTCM_RAM_DEST  0x20007500u
+#define DTCM_POOL_END  0x200095a8u
 uint8_t *osd_dtcm_ram_alloc(unsigned int size) {
-    uintptr_t frame = (uintptr_t)__builtin_frame_address(0);
-    uintptr_t pool_top = (frame - 0x2180u) & ~(uintptr_t)0x0fu;
-    uintptr_t dest = (pool_top - size) & ~(uintptr_t)0x1fu;
-
-    if (dest < 0x20000000u || (dest + size) > 0x20010000u) {
-        pd->system->logToConsole("[dtcmram] out of range (frame=%p), heap fallback",
-                                 (void *)frame);
+#ifdef TARGET_PLAYDATE
+    uintptr_t dest = DTCM_RAM_DEST;
+    if ((dest + size) > DTCM_POOL_END) {
+        pd->system->logToConsole("[dtcmram] size %u exceeds pool, heap fallback", size);
         return NULL;
     }
-
-    pd->system->logToConsole("[dtcmram] dest=%p size=%u frame=%p",
-                             (void *)dest, size, (void *)frame);
+    pd->system->logToConsole("[dtcmram] dest=%p size=%u (pool 0x200074d0..0x%08x)",
+                             (void *)dest, size, (unsigned)DTCM_POOL_END);
     return (uint8_t *)dest;
+#else
+    (void)size;
+    pd->system->logToConsole("[dtcmram] simulator, heap fallback");
+    return NULL;
+#endif
 }
 #endif
+
+#ifdef DTCM_POOL_SCAN
+/* Empirical DTCM pool discovery (Vecx PLAYDATE_ITCM_GUIDE.md method, done as
+   one paint-and-watermark run): paint the candidate pool between the firmware
+   data floor (~0x200074d0 per the guide's bisection) and the startup stack
+   frame with a per-address sentinel, then periodically report the largest
+   contiguous untouched run. Stack growth (incl. interrupts/audio) disturbs
+   the top; firmware data activity disturbs the bottom; what stays clean over
+   a full level is the real safe pool for RAM/hot-core relocation. */
+#define DTCM_SCAN_FLOOR 0x200074d0u
+#define DTCM_SCAN_WORD(p) (0xD7C30000u | ((uintptr_t)(p) & 0xFFFFu))
+
+static uint32_t *dtcm_scan_lo = (uint32_t *)DTCM_SCAN_FLOOR;
+static uint32_t *dtcm_scan_hi = NULL;
+
+static void dtcm_scan_paint(void) {
+    uintptr_t frame = (uintptr_t)__builtin_frame_address(0);
+    dtcm_scan_hi = (uint32_t *)((frame - 0x200u) & ~(uintptr_t)0x3fu);
+    if ((uintptr_t)dtcm_scan_hi <= (uintptr_t)dtcm_scan_lo) {
+        pd->system->logToConsole("[dtcmscan] no pool (frame=%p)", (void *)frame);
+        dtcm_scan_hi = NULL;
+        return;
+    }
+    for (volatile uint32_t *p = dtcm_scan_lo; p < dtcm_scan_hi; p++)
+        *p = DTCM_SCAN_WORD(p);
+    pd->system->logToConsole("[dtcmscan] painted %p..%p (%u bytes, frame=%p)",
+                             (void *)dtcm_scan_lo, (void *)dtcm_scan_hi,
+                             (unsigned)((uintptr_t)dtcm_scan_hi - (uintptr_t)dtcm_scan_lo),
+                             (void *)frame);
+}
+
+static void dtcm_scan_report(void) {
+    uint32_t *run_start = NULL, *best_start = NULL;
+    unsigned run_len = 0, best_len = 0;
+
+    if (!dtcm_scan_hi)
+        return;
+
+    for (uint32_t *p = dtcm_scan_lo; p < dtcm_scan_hi; p++) {
+        if (*p == DTCM_SCAN_WORD(p)) {
+            if (0 == run_len)
+                run_start = p;
+            run_len++;
+            if (run_len > best_len) {
+                best_len = run_len;
+                best_start = run_start;
+            }
+        } else {
+            run_len = 0;
+        }
+    }
+
+    pd->system->logToConsole("[dtcmscan] clean run %p..%p (%u bytes)",
+                             (void *)best_start,
+                             (void *)(best_start + best_len),
+                             best_len * 4u);
+}
+#endif /* DTCM_POOL_SCAN */
 
 int osd_get_show_fps(void) {
     return show_fps;
@@ -103,6 +177,16 @@ void osd_set_show_fps(int enabled) {
 static int playdate_update(void *ud) {
     if (app_return_to_picker_if_requested())
         return 1;
+
+#ifdef DTCM_POOL_SCAN
+    {
+        static int scan_frames = 0;
+        if (0 == scan_frames)
+            dtcm_scan_paint();
+        if (0 == (++scan_frames % 600))
+            dtcm_scan_report();
+    }
+#endif
 
     int auto_mode = (frame_skip == FRAME_SKIP_AUTO);
     int draw;
@@ -134,21 +218,29 @@ static int playdate_update(void *ud) {
 
         if (auto_boosted) {
             auto_boost_age++;
-            if (auto_boost_age >= AUTO_BOOST_MIN_FRAMES &&
+            if (auto_boost_age >= auto_boost_hold &&
                 auto_ema_fp < AUTO_BOOST_EXIT_FP) {
                 auto_boosted = 0;
+                auto_frames_since_exit = 0;
 #ifdef DIAG
                 pd->system->logToConsole("[autoskip] 2->1 after %d frames",
                                          auto_boost_age);
 #endif
             }
-        } else if (auto_ema_fp > AUTO_BOOST_ENTER_FP) {
-            auto_boosted = 1;
-            auto_boost_age = 0;
+        } else {
+            if (auto_frames_since_exit < 0x7FFF)
+                auto_frames_since_exit++;
+            if (auto_ema_fp > AUTO_BOOST_ENTER_FP) {
+                auto_boosted = 1;
+                auto_boost_age = 0;
+                auto_boost_hold = (auto_frames_since_exit < AUTO_FLAP_WINDOW)
+                                      ? AUTO_BOOST_HOLD_LONG
+                                      : AUTO_BOOST_MIN_FRAMES;
 #ifdef DIAG
-            pd->system->logToConsole("[autoskip] 1->2 ema=%d/16 ms",
-                                     (int)auto_ema_fp);
+                pd->system->logToConsole("[autoskip] 1->2 ema=%d/16 ms hold=%d",
+                                         (int)auto_ema_fp, auto_boost_hold);
 #endif
+            }
         }
     }
 

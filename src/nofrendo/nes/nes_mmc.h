@@ -60,6 +60,12 @@ typedef struct mapintf_s
 #if AUDIO
    apuext_t *sound_ext;
 #endif
+   /* Optional: scanlines until this mapper's next hblank IRQ fires (1 = fires
+      on the next hblank call). Lets nes_renderframe batch CPU execution across
+      IRQ-free scanline stretches while preserving exact IRQ timing. NULL for
+      mappers without a scanline IRQ; auto-NULL for mappers that predate this
+      field (trailing positional initializer). */
+   int (*irq_countdown)(void);
 } mapintf_t;
 
 

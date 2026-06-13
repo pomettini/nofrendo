@@ -77,6 +77,9 @@ option(PPU_FAST_STRIKE "Return sprite-zero hit as soon as it is detected" OFF)
 option(PPU_SPRITE_CACHE_DRAW_ONLY "Build the sprite render cache only on drawn frames" OFF)
 option(PPU_FAST_OAMDMA "Copy sprite DMA from mapped CPU memory without 256 helper calls" OFF)
 option(NES_RAM_DTCM "Place the 2KB NES work RAM in the DTCM stack pool instead of heap" OFF)
+option(DTCM_POOL_SCAN "Paint the DTCM pool with sentinels and report the clean run (discovery probe)" OFF)
+option(PPU_SPRITE_LIVE_CHR "Read sprite CHR live instead of the scanline-0 pattern cache (mid-frame bank-switch probe)" OFF)
+option(NES_IRQ_MAPPER_BATCH "Batch CPU across IRQ-free scanlines for hblank-IRQ mappers (MMC3 etc.) using the mapper IRQ countdown" OFF)
 option(ALIGN_PRG_ROM "Align iNES PRG ROM start for cache experiments" OFF)
 option(DIAG_CPU_EXEC_TIMING "Time every nes6502_execute call in diagnostic builds" OFF)
 set(NES_CPU_BATCH_SCANLINES "1" CACHE STRING
@@ -145,6 +148,9 @@ set(GAME_DEFINES
     $<$<BOOL:${PPU_SPRITE_CACHE_DRAW_ONLY}>:PPU_SPRITE_CACHE_DRAW_ONLY=1>
     $<$<BOOL:${PPU_FAST_OAMDMA}>:PPU_FAST_OAMDMA=1>
     $<$<BOOL:${NES_RAM_DTCM}>:NES_RAM_DTCM=1>
+    $<$<BOOL:${DTCM_POOL_SCAN}>:DTCM_POOL_SCAN=1>
+    $<$<BOOL:${PPU_SPRITE_LIVE_CHR}>:PPU_SPRITE_LIVE_CHR=1>
+    $<$<BOOL:${NES_IRQ_MAPPER_BATCH}>:NES_IRQ_MAPPER_BATCH=1>
     $<$<BOOL:${ALIGN_PRG_ROM}>:ALIGN_PRG_ROM=1>
     $<$<BOOL:${DIAG_CPU_EXEC_TIMING}>:DIAG_CPU_EXEC_TIMING=1>
     NES_CPU_BATCH_SCANLINES=${NES_CPU_BATCH_SCANLINES}

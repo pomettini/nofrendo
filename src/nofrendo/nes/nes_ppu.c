@@ -158,8 +158,16 @@ void ppu_destroy(ppu_t **src_ppu)
    }
 }
 
+/* Set when a CHR page (0-7) is remapped; tells ppu_renderoam the scanline-0
+   sprite pattern cache is stale for the rest of the frame (mid-frame CHR
+   bank-switch games like Batman). Cleared by ppu_build_sprite_cache. */
+static bool sprite_chr_dirty = false;
+
 void ppu_setpage(int size, int page_num, uint8 *location)
 {
+   if (page_num < 8)
+      sprite_chr_dirty = true;
+
    /* deliberately fall through */
    switch (size)
    {
@@ -896,6 +904,9 @@ static void ppu_build_sprite_cache(void)
          oam_pat2[s][row] = dp[8];
       }
    }
+
+   /* cache now matches the current CHR mapping */
+   sprite_chr_dirty = false;
 }
 
 
@@ -943,12 +954,35 @@ static void ppu_renderoam(uint8 *vidbuf, int scanline)
 
       uint8 col_high = (attrib & 3) << 2;
 
-      /* CHR data from pre-decoded pattern cache — no PPU_MEM() access here */
       int sprite_row = scanline - sprite_y;
       bool check_strike = (sprite_num == 0) && (false == ppu.strikeflag);
-      int strike_pixel = draw_oamtile(bmp_ptr, attrib,
-                                      oam_pat1[sprite_num][sprite_row],
-                                      oam_pat2[sprite_num][sprite_row],
+      uint8 pat1, pat2;
+#ifndef PPU_SPRITE_LIVE_CHR
+      if (!sprite_chr_dirty)
+      {
+         /* Fast path: pre-decoded pattern cache — no PPU_MEM() access here */
+         pat1 = oam_pat1[sprite_num][sprite_row];
+         pat2 = oam_pat2[sprite_num][sprite_row];
+      }
+      else
+#endif
+      {
+         /* CHR pages were remapped after the scanline-0 cache build (Batman
+            and other mid-frame bank-switchers) — or PPU_SPRITE_LIVE_CHR probe
+            build. Read CHR live through the current page mapping. */
+         int h = ppu.obj_height;
+         int src = (attrib & OAMF_VFLIP) ? (h - 1 - sprite_row) : sprite_row;
+         uint32 vram_adr;
+         if (16 == h)
+            vram_adr = ((tile_index & 1) << 12) | ((tile_index & 0xFE) << 4);
+         else
+            vram_adr = ppu.obj_base + ((uint32)tile_index << 4);
+         uint32 chr_off = (src > 7) ? (16u + (src & 7)) : (uint32)src;
+         uint8 *dp = &PPU_MEM(vram_adr + chr_off);
+         pat1 = dp[0];
+         pat2 = dp[8];
+      }
+      int strike_pixel = draw_oamtile(bmp_ptr, attrib, pat1, pat2,
                                       ppu.palette + 16 + col_high, check_strike);
       if (strike_pixel >= 0)
          ppu_setstrike(strike_pixel);

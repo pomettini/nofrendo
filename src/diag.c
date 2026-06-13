@@ -64,7 +64,9 @@ extern PlaydateAPI *pd;
 #define DIAG_PPU_STRIKE "cycle"
 #endif
 
-#ifdef PPU_SPRITE_CACHE_DRAW_ONLY
+#ifdef PPU_SPRITE_LIVE_CHR
+#define DIAG_PPU_SPRCACHE "live"
+#elif defined(PPU_SPRITE_CACHE_DRAW_ONLY)
 #define DIAG_PPU_SPRCACHE "draw"
 #else
 #define DIAG_PPU_SPRCACHE "all"
@@ -188,6 +190,12 @@ extern PlaydateAPI *pd;
 #define DIAG_CPU_HOTCLUSTER "on"
 #else
 #define DIAG_CPU_HOTCLUSTER "off"
+#endif
+
+#ifdef NES_IRQ_MAPPER_BATCH
+#define DIAG_IRQ_BATCH "on"
+#else
+#define DIAG_IRQ_BATCH "off"
 #endif
 
 #ifdef NES6502_JMP_SPIN
@@ -361,6 +369,7 @@ void diag_frame_begin(void) {
                                  " cpu_fastopbyte=" DIAG_CPU_FASTOPBYTE
                                  " cpu_fastmemops=" DIAG_CPU_FASTMEMOPS
                                  " cpu_hotcluster=" DIAG_CPU_HOTCLUSTER
+                                 " irq_batch=" DIAG_IRQ_BATCH
                                  " cpu_jmpspin=" DIAG_CPU_JMPSPIN
                                  " cpu_rom=" DIAG_CPU_ROM
                                  " cpu_split=" DIAG_CPU_SPLIT

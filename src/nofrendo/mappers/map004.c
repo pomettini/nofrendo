@@ -169,6 +169,18 @@ static void map4_hblank(int vblank)
    }
 }
 
+/* Scanlines until the next IRQ fires. Conservative: always errs small so the
+   batcher never runs CPU across an IRQ boundary. map4_hblank decrements
+   irq.counter while rendering and fires when it underflows past 0. */
+static int map4_irq_countdown(void)
+{
+   if (false == irq.enabled)
+      return 0x7FFF;            /* IRQ off — nothing imminent */
+   if (true == irq.reset || irq.counter < 0)
+      return 1;                 /* about to reload/just fired — don't batch across it */
+   return irq.counter + 1;      /* hblanks remaining before underflow */
+}
+
 static void map4_getstate(SnssMapperBlock *state)
 {
    state->extraData.mapper4.irqCounter = irq.counter;
@@ -211,8 +223,9 @@ mapintf_t map4_intf =
    NULL, /* memory read structure */
    map4_memwrite, /* memory write structure */
 #if AUDIO
-   NULL /* external sound device */
+   NULL, /* external sound device */
 #endif
+   map4_irq_countdown, /* scanlines until next IRQ */
 };
 
 /*

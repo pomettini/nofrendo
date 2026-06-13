@@ -2437,14 +2437,69 @@ Findings:
 
 - The 2 KB block spanned 0x200071a0-0x200079a0 — roughly 700 bytes deeper into the pool
   than the validated 80-byte tcmhot probe (0x20007970-0x200079c0). Something in that
-  deeper region is live during ROM load (file I/O stack depth or OS data), confirming the
-  Vecx guide's ~1328-byte pool ceiling is a hard limit, not conservatism.
-- Conclusion: **the DTCM stack pool cannot host the 2 KB NES RAM.** Any future DTCM data
-  placement must fit within ~1.3 KB total alongside whatever else is relocated there.
-  A partial split (zero page + stack only) is not possible because the core requires
-  `mem_page[0]` to be one contiguous 2 KB block.
-- `NES_RAM_DTCM` stays available as an opt-in probe flag but must remain OFF everywhere.
-  The device was restored to the validated fast-line diag build.
+  deeper region is live during ROM load.
+- `NES_RAM_DTCM` stays available as an opt-in probe flag but must remain OFF until a
+  corrected placement is validated. The device was restored to the fast-line diag build.
+
+**CORRECTION (2026-06-12, from the full Vecx PLAYDATE_ITCM_GUIDE.md):** the original
+"1328-byte hard ceiling" conclusion above is wrong. The guide's bisection on the same
+hardware found the ceiling was a *placement* artifact:
+
+- DTCM layout: firmware data below a floor of ~**0x200074d0**; live stack above a ceiling
+  that stayed over ~0x20008a00 for vecx. The gap between is a **~5 KB writable pool**.
+- Our crashed block (0x200071a0-0x200079a0) had its bottom ~0x330 *below the firmware
+  floor* — it corrupted firmware data. The crash is fully explained by placement, not size.
+- Firmware holes exist at 64-byte granularity below the floor (e.g. 0x20006980); dense
+  writes there fault.
+- The guide's vecx data-relocation caveat ("don't move data that fits D-cache": their 1 KB
+  RAM in DTCM lost 4.5%) does **not** transfer to FamiCrank: their regression came from
+  converting a fixed-address array into pointer indirection, and FamiCrank's NES RAM is
+  already pointer-accessed (`ram = cpu.mem_page[0]`), so relocation adds zero indirection.
+- Also from the guide, for any future hot-core attempt: the old tcmcore failure was the
+  *wrapper shape* (slice-entry only, hit=0), not the mechanism — vecx's +13-15% core is
+  entered per instruction with per-instruction fallback. Outbound calls from relocated
+  code need `-mlong-calls -fno-lto` on that translation unit. Vecx also measured an
+  I-cache packing fragility effect (±3 fps from unrelated edits) that matches our long
+  history of flat/mixed layout probes.
+
+**DTCM pool scan — MEASURED 2026-06-12 (`make install-diag-dtcmscan`).** Paint-and-
+watermark run: painted 0x200074d0..0x200099c0 (9,456 bytes) at first update, full Mario
+1-1 with audio and busy scenes. The clean run was **identical in all four reports**:
+
+```
+[dtcmscan] clean run 0x200074d0..0x200095a8 (8408 bytes)
+```
+
+- **FamiCrank's measured safe DTCM pool: 0x200074d0-0x200095a8 (8,408 bytes).**
+- The clean run starts exactly at the paint floor — vecx's firmware floor (0x200074d0)
+  holds for this SDK/app, and no firmware activity occurred above it.
+- The deepest stack excursion over the full level (incl. audio interrupts and autoskip
+  transitions) reached only 0x200095a8 — startup frame was 0x20009bf0.
+- Budget: enough for the 2 KB NES RAM **and** a ~4-5 KB per-instruction hot core with a
+  generous stack margin. Caveat: measured on one game/level; deeper-stacking ROMs or
+  menus could lower the ceiling. Keep relocated blocks at the pool bottom.
+
+**NES RAM retry — STABLE, PROMOTED 2026-06-12.** `osd_dtcm_ram_alloc` places the 2 KB
+block at fixed **0x20007500-0x20007D00** — bottom of the measured pool, 64-byte aligned,
+6.3 KB below the observed stack watermark.
+
+Device row (`build=2026-06-12 00:50:09`, `[dtcmram] dest=0x20007500 size=2048`):
+
+- **Stability: full Mario 1-1, zero corruption, zero glitches.** First successful TCM
+  relocation of the campaign; validates the guide's pool map end to end on this device.
+- Performance: flat to slightly positive, ~1 ms territory. The stubborn late band
+  narrowed (one 44 fps window vs 3-4 consecutive 44-45 windows in the two prior runs),
+  boosts mostly at minimum hold (longest 73 frames vs 103-144), tail windows 11-12 ms
+  `cpu_only` vs 12-13 ms. Within noise individually; direction consistently positive.
+- Promoted into `FAST_FLAGS` despite the modest measured win because the change has no
+  plausible cost: the RAM was already pointer-accessed (no new indirection — the vecx
+  data-relocation caveat does not apply), DTCM access is single-cycle (equal to a D-cache
+  hit, never a miss), and 64 D-cache lines are freed for PRG ROM. Measured non-negative +
+  mechanically can't-lose.
+- Ship caveat: pool watermark measured on one game/level. Soak-test a few other ROMs
+  from the picker before release. Remaining pool above the RAM block:
+  0x20007D00-0x200095a8 (~6.3 KB incl. margin) — available for a future per-instruction
+  DTCM hot core (the vecx-shaped one, +13-15% in their project).
 
 ### Hot-opcode case clustering - probe built 2026-06-12, awaiting device row
 
@@ -2488,6 +2543,126 @@ Findings:
   `cpu_only` is the practical floor of this interpreter on this cache hierarchy.
 - **Release candidate**: promoted fast line + Auto frameskip (21 ms enter / 18 ms exit /
   50-frame hold). `make install` ships it with DIAG=OFF.
+
+### Multi-ROM soak round - 2026-06-12 (DTCM RAM build 00:50:09)
+
+Five games, five mappers, full sessions each. **DTCM RAM stability: PASS in all five —
+zero crashes, zero state corruption.** The promoted `NES_RAM_DTCM` placement is soaked.
+
+| Game (mapper) | fps | cpu_only | ppu_full | Verdict |
+|---|---:|---:|---:|---|
+| Zelda 1 (MMC1) | 43-50 | 6-18 ms | 10-23 ms | Plays decently; dips only in busy scroll scenes |
+| Mega Man 2 (MMC1) | 38-50 | 8-21 ms | 12-27 ms | Plays decently |
+| Punch-Out!! (MMC2) | 43-50 | 8-12 ms | 14-25 ms | OK but autoskip flapped (see below) |
+| Kirby's Adventure (MMC3) | 26-43 | 17-31 ms | 22-44 ms | **Plays badly — batching cliff** |
+| Batman | 28-50 | 11-27 ms | 14-40 ms | Plays badly; possible sprite glitch (unconfirmed vs dithering) |
+
+**Finding 1 — the MMC3/IRQ-mapper batching cliff.** `cpu_batch=16` only engages when the
+mapper has no hblank callback. MMC3 (Kirby, SMB3) and Batman's mapper clock per-scanline
+IRQ counters, so those games silently run per-scanline interpreter entry — the
+pre-batching configuration that measured 29-34 fps in May. The Kirby/Batman numbers match
+that era exactly. This is now the single largest per-game performance gap. Possible
+future work: batch CPU through the 22 vblank scanlines (no IRQ counter clocking while
+rendering is off) for IRQ mappers — a safe subset worth ~8% of the frame; full
+visible-line batching for MMC3 would need careful IRQ-timing treatment (the batch-32
+history shows how that fails).
+
+**Finding 2 — autoskip flap pathology (Punch-Out).** Load shape: draw frames 24-25 ms
+(huge sprites) but skip frames only 11-12 ms. At skip 1 the EMA sits right at the enter
+threshold; boosting collapses the average under the exit line, so the controller flapped
+1->2->1 once per second for the entire session (every exit at the 50-52-frame minimum,
+every re-entry within a few frames). Visual result: refresh toggling 25<->16 fps
+continuously.
+
+**Fix applied (anti-flap escalation):** if a boost re-enters within 120 frames of the
+last exit, the hold escalates from 50 to 300 frames. Sustained at-threshold loads now
+switch visual modes ~5x less often; spaced re-entries (Mario's pattern) keep the short
+hold. Diag line now logs the chosen hold: `[autoskip] 1->2 ema=... hold=...`.
+Validation: re-run Punch-Out; expect far fewer `[autoskip]` transitions, `hold=300`
+after the first flap, and steadier visuals.
+
+**Finding 3 — Batman sprite glitch: CONFIRMED real (2026-06-12 retest).** Not
+quantization. Prime suspect: the sprite pattern cache's documented blind spot — it
+pre-decodes all CHR at scanline 0 and assumes the mapping stays valid for the frame.
+Batman's Sunsoft mapper animates sprites by bank-switching CHR mid-frame, so the cache
+serves stale pre-switch patterns every frame. Supporting evidence: Punch-Out's 8x16
+sprites render correctly (rules out the 8x16 decode path), and Batman is on the same
+IRQ-mapper class that does mid-frame raster work.
+
+**Probe result (`make install-diag-livechr`, build 01:50:22): sprite FIXED with live CHR
+reads — root cause confirmed.** The cache's scanline-0 snapshot goes stale when the game
+bank-switches CHR mid-frame.
+
+**Fix shipped (2026-06-12): CHR-dirty auto-fallback.** `ppu_setpage()` sets
+`sprite_chr_dirty` whenever a CHR page (0-7) is remapped; `ppu_renderoam()` checks the
+flag per sprite — clean cache uses the fast pre-decoded path, dirty falls back to live
+CHR reads for the rest of the frame; `ppu_build_sprite_cache()` clears the flag at
+scanline 0. Games that never switch CHR mid-frame (Mario etc.) keep full cache speed
+(one predictable branch added per sprite-scanline); mid-frame switchers (Batman) get
+correctness at live-read cost. `PPU_SPRITE_LIVE_CHR` remains as a force-live probe flag.
+This was a **correctness bug affecting all mid-frame CHR-switching games**, not only
+Batman — MMC3 titles that swap sprite banks per-frame were silently at risk too.
+
+**Validated 2026-06-12 (build 04:57:55, single Batman-then-Mario log):** Batman sprites
+render correctly through the runtime fallback (banner `sprcache=all`, not the forced-live
+probe). Mario from frame 3600 holds 49-50 fps with `cpu_only` 12-17 ms — the per-sprite
+dirty-flag branch costs nothing on the clean fast path. Correctness + zero fast-path
+regression confirmed in one run. **Promoted; the fix is default runtime behavior.**
+
+**Anti-flap validation (2026-06-12, build 01:14:29):**
+
+- Punch-Out: first boost `hold=50`, immediate re-entry escalates to `hold=300`;
+  transitions ~6x less frequent (every ~6 s vs every ~1 s); steady 44-46 fps; user
+  confirms it plays better. **Promoted.**
+- Mario 1-1 regression check: clean — same 44-50 shape, short holds for spaced load,
+  escalated holds engage only in sustained sections and behave correctly.
+
+### IRQ-mapper CPU batching - probe built 2026-06-12, awaiting device row
+
+The MMC3/IRQ-mapper batching cliff (Kirby/SMB3/Batman at 28-36 fps) is the last perf
+item. Root cause: `cpu_batch_lines = mapintf->hblank ? 1 : 16` — any scanline-IRQ mapper
+runs 262 separate `execute_cpu()` calls/frame (interpreter evicted from I-cache by PPU
+code between each), the pre-batching configuration.
+
+**Why the May batch-32 failure does NOT apply here.** batch-32 batched blindly and
+delivered the split IRQ up to 16+ lines late → slow-motion/softlock. This design is
+*timing-exact*: it clamps the batch to the mapper's own IRQ countdown so no IRQ can ever
+fire mid-batch.
+
+Design:
+- New optional `mapintf_t.irq_countdown()` (trailing field → auto-NULL for all 40+
+  existing mappers via positional init). MMC3 (`map4_irq_countdown`) returns scanlines
+  until the counter underflows; conservative (returns 1 on reset/just-fired, 0x7FFF when
+  IRQ disabled) so it always errs toward less batching, never across an IRQ.
+- `nes_renderframe`: hblank mappers WITH a countdown batch at width 16; before each
+  hblank, if `irq_countdown() <= 1` (this hblank will fire), flush the pending CPU batch
+  first. CPU then sits exactly at the previous scanline, IRQ injects with correct timing,
+  taken at the next batch start — identical to batch=1 but paid only at the ~1 split line
+  per frame instead of all 240. hblank mappers WITHOUT a countdown still get batch=1.
+- Non-IRQ mappers (Mario etc.) are completely unaffected.
+
+Build: `make install-diag-irqbatch` (banner `irq_batch=on`). Mappers other than MMC3
+keep `irq_countdown=NULL` → unchanged, so only MMC3 titles change behavior in this probe.
+
+**Device result (build 2026-06-13 21:28:54, `irq_batch=on`): BIG WIN — promoted.**
+
+| Kirby's Adventure | batch=1 (04:57:55) | irq_batch | Delta |
+|---|---|---|---|
+| Busy windows fps | 28-36 | 34-44 | +~8 fps |
+| Busy windows cpu_only | 22-28 ms | 17-24 ms | -~5 ms |
+| Menu / lighter play fps | ~40 | 46-49 | +~7 fps |
+
+- Mario 1-1: 44-50 fps, identical shape — non-IRQ path untouched, **zero regression**
+  (confirms the change is isolated to hblank mappers with a countdown).
+- No slow-motion, no softlock observed in menu + level 1-1.
+- The timing-exact countdown clamp delivered the IRQ-free-stretch batching benefit
+  without the batch-32 timing failure. Promoted into `FAST_FLAGS`.
+- Benefits every MMC3 title (SMB3, Kirby, Crystalis, many more) — the largest single
+  per-game-class win since the original batching. Other IRQ mappers (MMC5, VRC, FME-7)
+  still get batch=1 until they implement `irq_countdown` — a clean future extension.
+- **Open visual check**: status-bar split position on Kirby/SMB3 (timing correctness
+  proof) still needs an explicit eyeball; if a split ever jitters by a line, tune
+  `map4_irq_countdown`. No artifact reported in the validation session.
 
 ### Background tile CHR cache — only if DTCM becomes available
 
