@@ -2793,6 +2793,60 @@ already cached; the cold misses are diffuse and don't fit fast memory.** The fas
 avenue for the CPU bottleneck is exhausted. `NES_PRG_DTCM` stays an OFF probe flag; the
 profiler (`NES6502_PRGPROFILE`) and the seam-overlap technique are kept as reference.
 
+### Turbo toggle (runtime CPU cycle-trim) - added 2026-06-14
+
+After the fast-memory avenue was exhausted (cpu-struct DTCM, hot core, PRG mirror all flat),
+the user opted for an explicit speed-over-accuracy lever. Cycle-trim was tried compile-time
+before (diag-cycletrim: 92% glitchy, 96% safe-but-mixed) and rejected as a forced default —
+but as an **optional, off-by-default runtime toggle** it's a legitimate power-user feature.
+
+Implementation:
+- `nes.c`: the float-path per-scanline cycle step is now a runtime global
+  `nes_scanline_cycle_step` (was the compile-time `NES_SCANLINE_CYCLES` macro), with
+  `nes_set_cpu_cycle_percent(int)` to scale it (clamped 50-100%).
+- `osd.c`: `osd_set_turbo(level)` maps menu levels to percentages —
+  Off=100, Light=95, Med=90, High=85. Default Off (fully accurate).
+- `main.c`: "Turbo" options menu item. **Playdate caps custom menu items at 3** (ROM Picker
+  + Frameskip + Turbo), so Show FPS was dropped from the menu to make room (its `drawFPS`
+  overlay stays on by default; the osd machinery is retained).
+
+Mechanism/expectation: trimming runs fewer 6502 cycles per emulated frame → less work →
+higher fps, but the game gets fewer cycles/frame so CPU-bound games run slightly slow / more
+glitch-prone. Games with spare frame time (idle waits) get near-free fps; heavy games
+(Kirby/Batman) trade visible glitches for speed. Default-off keeps the accurate experience
+intact.
+
+**Device result: REJECTED — reverted 2026-06-14.** Kirby at High was too glitchy to play
+with no noticeable speedup; Batman not glitchy but no perceptible gain; user estimate 1-2 fps
+at best, not worth the artifacts. Confirms the reason: cycle-trim only reclaims idle/wait-loop
+cycles, but the heavy games are CPU-bound on **real work**, so trimming cuts into that work
+(glitches) rather than buying speed. Turbo menu + runtime cycle-step reverted; Show FPS
+restored.
+
+### Optimization campaign — practical ceiling reached (2026-06-14)
+
+After ~30 measured experiments, every lever that worked is promoted (LEGAL_ONLY, switch
+dispatch, FRAME_SKIP, sprite cache, PC_PTR, fast branches/memops, lazy cycles, direct memio,
+fast OAM DMA, fast JMP, IRQ-mapper batching, Auto frameskip + anti-flap, DTCM RAM, CHR sprite
+fix). Everything else came back flat or rejected for one well-understood reason:
+
+- **CPU-side fast-memory relocation** (cpu-struct DTCM, hot core, PRG-page mirror): all flat —
+  the hot working set is already cached; the cold D-cache misses are diffuse across the 32 KB
+  PRG ROM and don't fit the ~6 KB DTCM pool. The interpreter already fits the 16 KB I-cache,
+  so there's no eviction to relieve (unlike the vecx 6809 case the technique came from).
+- **Dispatch/layout** (hot-cluster, jumptable, loop-align, batch 24/32, spinhack, fastpc,
+  linear-rom, fixedcycles): flat.
+- **Accuracy trades** (cycle-trim / Turbo): glitches without meaningful speed.
+- **Audio**: `apu_process` (~730 samples/frame x 5-channel DSP) is in `sound_fill_buffer`
+  ("other", ~2 ms), not the cpu_only floor — not a useful lever.
+
+The remaining gap on heavy MMC3 games (Kirby/Batman busy windows ~33-45 fps, cpu_only
+~20-24 ms) is the 6502 interpreter doing genuine work, bottlenecked by D-cache misses on a
+32 KB program that cannot fit fast memory. The only lever that structurally breaks this is a
+**dynamic recompiler** (6502->ARM JIT) — a multi-week rewrite, not a probe. Clean micro-opts
+that remain (e.g. `ppu_renderbg` register-pressure tidy) are sub-1 ms and imperceptible.
+Recommendation: the current promoted build is the release.
+
 ### Background tile CHR cache — only if DTCM becomes available
 
 The 4 KB `bg_tile_cache[256][8]` approach was tried and **caused regression** (see failures
