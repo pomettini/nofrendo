@@ -1,0 +1,99 @@
+# FamiCrank 0.2 — Performance Findings & Wrap-Up
+
+A NES emulator (Nofrendo core) for the Playdate. This note summarizes the
+optimization campaign that produced the 0.2 release: what shipped, why it
+works, what didn't, and where the ceiling is. The blow-by-blow log lives in
+`PERF.md`; this is the executive summary.
+
+## Target & result
+
+- **Goal:** 50 fps (PAL NES speed). Starting point: ~30 fps, unshippable.
+- **Result:** native game speed everywhere via adaptive frameskip, with the
+  visual refresh at:
+  - **Mario / most non-IRQ-mapper games:** locked ~50 fps.
+  - **Heavy MMC3 games (Kirby, Batman, SMB3):** 45–50 fps in normal play,
+    33–40 fps in the busiest scenes.
+- Correct rendering verified across five mappers (NROM, MMC1, MMC2, MMC3, +).
+
+## Hardware reality (Playdate rev B, STM32F746 @ 168 MHz)
+
+- 16 KB I-cache, 16 KB D-cache (4-way).
+- ITCM (16 KB, fast instruction memory): **MPU write-protected by the OS** —
+  unusable for code relocation (confirmed by a hard fault).
+- DTCM (64 KB, fast data memory): usable, but the OS/stack leave only a
+  **~8 KB contiguous free pool** (0x200074d0–0x20009438, measured per-game).
+- **The bottleneck is the D-cache**, not the CPU clock. Our emulator reads each
+  NES opcode/operand from the 32 KB PRG ROM as *data*; 32 KB vs 16 KB D-cache
+  means constant misses, and busy scenes spread the working set wider.
+
+## What shipped (the wins, in rough order of impact)
+
+1. **`NES6502_LEGAL_ONLY`** — drop ~62 undocumented opcodes; shrinks the
+   interpreter to fit the 16 KB I-cache. The single biggest gain (~+8 fps).
+2. **Switch dispatch + `-O2`** for the core; `-O3` elsewhere.
+3. **Adaptive frameskip ("Auto")** — runs the 6502 at native speed always,
+   dropping only *visual* frames under load. With anti-flap hysteresis so the
+   refresh doesn't oscillate. This is what makes game speed correct everywhere.
+4. **IRQ-mapper CPU batching** — the big win for MMC3 games. Batches CPU across
+   IRQ-free scanlines, clamped to the mapper's own IRQ countdown so timing
+   stays exact (the status-bar split lands on the right line). +~8 fps on
+   Kirby/Batman, zero effect on non-IRQ games.
+5. **Interpreter fast paths** — `NES6502_PC_PTR` (direct opcode fetch),
+   fast `JMP`/`BNE`/`BPL`/`BEQ`, hot load/store specialization, lazy cycle
+   accounting, direct memory I/O, fast OAM DMA.
+6. **Sprite pattern cache** + **mid-frame CHR-bank-switch fix** — pre-decode
+   sprite CHR; fall back to live reads only when a game (e.g. Batman) swaps CHR
+   mid-frame. Fixes a real rendering bug affecting all such games.
+7. **NES work RAM in DTCM** — the 2 KB zero-page/stack RAM is zero-wait.
+   Marginal but free.
+8. Platform: direct audio-ring fill, display-update skip on skipped frames.
+
+## What was tried and rejected — and the one lesson
+
+Roughly 30 experiments. Nearly all the *rejected* ones failed for **one reason**:
+
+> **The hot working set is already cached; the cold misses are diffuse and
+> don't fit fast memory.**
+
+- **Code relocation to fast memory** (whole interpreter, a "hot core" of the
+  most-used opcodes): flat. Our interpreter already fits the I-cache, so there's
+  no eviction to relieve — unlike the GB/vecx emulators this trick comes from,
+  whose interpreters overflowed cache.
+- **Data relocation to fast memory** (cpu struct, the hottest PRG page): flat.
+  The hottest page is so heavily used that the D-cache keeps it resident anyway;
+  relocating it buys nothing. The actual misses are spread across the *other*
+  pages, which are too many to fit the ~8 KB DTCM pool.
+- **Dispatch/layout tweaks** (computed-goto, loop alignment, opcode clustering,
+  wider CPU batches): flat or timing-unsafe.
+- **Accuracy trades** (running the 6502 below 100% cycle budget — the "Turbo"
+  toggle): glitches without meaningful speed, because heavy games spend their
+  cycles on real work, not idle loops.
+
+These weren't bad ideas — they're aimed at a wall this specific
+hardware/workload puts where none of them can move it.
+
+## The ceiling, honestly
+
+The remaining gap on heavy MMC3 games is the 6502 interpreter doing genuine
+work, bottlenecked by D-cache misses on a program that cannot fit fast memory.
+The only thing that structurally beats interpreter overhead is a **dynamic
+recompiler (6502 → ARM JIT)** — a multi-week rewrite with its own cache risks,
+a deliberate project rather than an incremental probe. The clean micro-
+optimizations that remain are sub-millisecond and imperceptible.
+
+**0.2 is the release.** It went from "can't ship" to a genuinely good 1-bit
+NES experience: native speed on the common games, a real structural gain on the
+hard ones, correct rendering, and a clean menu (ROM Picker / Frameskip / Show
+FPS). Further speed is a JIT project, scoped separately.
+
+## Build
+
+```sh
+make            # production build (DIAG off, full FAST_FLAGS optimizations)
+make install    # build + push to a connected Playdate
+make diag-fast  # same build + on-device [diag]/[autoskip] console logging
+```
+
+The experimental flags from the campaign remain in the source, guarded off and
+documented in `PERF.md`, as reference for any future JIT work — they are
+compiled out of the shipping binary.

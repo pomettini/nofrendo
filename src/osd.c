@@ -56,7 +56,7 @@ static int auto_boosted = 0;
 static int auto_boost_age = 0;
 static int auto_boost_hold = AUTO_BOOST_MIN_FRAMES;
 static int auto_frames_since_exit = 0x7FFF;
-static int show_fps = 1;
+static int show_fps = 0;   /* clean screen by default; toggle in the system menu */
 
 int osd_get_frame_skip(void) {
     return frame_skip;
@@ -94,15 +94,18 @@ uint8_t *osd_dtcm_ram_alloc(unsigned int size) {
 #ifdef TARGET_PLAYDATE
     uintptr_t dest = DTCM_RAM_DEST;
     if ((dest + size) > DTCM_POOL_END) {
+#ifdef DIAG
         pd->system->logToConsole("[dtcmram] size %u exceeds pool, heap fallback", size);
+#endif
         return NULL;
     }
+#ifdef DIAG
     pd->system->logToConsole("[dtcmram] dest=%p size=%u (pool 0x200074d0..0x%08x)",
                              (void *)dest, size, (unsigned)DTCM_POOL_END);
+#endif
     return (uint8_t *)dest;
 #else
     (void)size;
-    pd->system->logToConsole("[dtcmram] simulator, heap fallback");
     return NULL;
 #endif
 }
