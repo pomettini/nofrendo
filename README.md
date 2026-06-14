@@ -41,7 +41,7 @@ FamiCrank does not support saving (yet).
 ## Credits
 
 - **Nofrendo core**: Matthew Conte (1998–2000).
-- **NES port base**: [nwagyu](https://github.com/nwagyu/nofrendo).
+- **NumWorks port**: [nwagyu](https://github.com/nwagyu/nofrendo).
 - **Playdate port**: [Giorgio Pomettini](https://www.giorgiopomettini.eu/).
 - **Graphical assets**: [Noemi Frulio](https://noemifrulio.itch.io/).
 
