@@ -109,7 +109,11 @@ extern int (*nes6502_execute_ptr)(int total_cycles);
 extern void nes6502_itcm_init(void *(*alloc_fn)(void *, size_t));
 
 #if defined(NES6502_TCMHOT_PROBE) || defined(NES6502_TCMHOT_CORE)
-#define NES6502_TCMHOT_MAX_BYTES 1328u
+#define NES6502_TCMHOT_MAX_BYTES 4096u
+/* Fixed DTCM placement for the hot core, from the 2026-06-12 pool scan:
+   measured safe pool 0x200074d0..0x200095a8; NES RAM occupies 0x20007500..
+   0x20007D00; the core sits above it with margin below the stack watermark. */
+#define NES6502_TCMHOT_CORE_DEST 0x20007D00u
 #endif
 
 #ifdef NES6502_TCMHOT_PROBE
@@ -177,6 +181,15 @@ extern void nes6502_release(void);
 #ifdef NES6502_OPPROFILE
 extern void nes6502_opcode_profile_reset(void);
 extern void nes6502_opcode_profile_snapshot(uint32 counts[256], uint32 *total);
+#endif
+
+#ifdef NES6502_PRGPROFILE
+extern void nes6502_prg_profile_reset(void);
+extern void nes6502_prg_profile_snapshot(uint32 counts[16], uint32 *total);
+#endif
+
+#if defined(NES_PRG_DTCM) && defined(TARGET_PLAYDATE) && defined(__ELF__)
+extern uint32 nes6502_prg_dtcm_copies(void); /* # of hot-page copies into DTCM */
 #endif
 
 /* Context get/set */

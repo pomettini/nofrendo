@@ -1,6 +1,6 @@
 SDK      ?= $(HOME)/Developer/PlaydateSDK
 TOOLCHAIN = $(SDK)/C_API/buildsupport/arm.cmake
-BASE_FLAGS = -DCMAKE_BUILD_TYPE=Release -DAUDIO=ON -DAUDIO_DIRECT_RING=ON -DDIAG=OFF -DDIAG_FPS_ONLY=OFF -DPPU_BG=ON -DPPU_SPRITES=ON -DPPU_BLIT=ON -DPPU_FAST_STRIKE=OFF -DPPU_SPRITE_CACHE_DRAW_ONLY=OFF -DPPU_FAST_OAMDMA=OFF -DNES_FIXED_SCANLINE_CYCLES=OFF -DALIGN_PRG_ROM=OFF -DDIAG_CPU_EXEC_TIMING=OFF -DNES_CPU_BATCH_SCANLINES=1 -DNES_CPU_CYCLE_PERCENT=100 -DNES6502_OPT_LEVEL=O3 -DNES6502_JUMPTABLE_DISPATCH=OFF -DNES6502_LAZY_CYCLES=OFF -DNES6502_ALIGN_LOOPS=OFF -DNES6502_SPINHACK=OFF -DNES6502_OPPROFILE=OFF -DNES6502_FAST_PC_OPS=OFF -DNES6502_HOTOPS=OFF -DNES6502_FAST_MEMIO=OFF -DNES6502_DIRECT_MEMIO=OFF -DNES6502_FAST_JMP_ABS=OFF -DNES6502_FAST_BNE=OFF -DNES6502_FAST_BPL=OFF -DNES6502_FAST_BEQ=OFF -DNES6502_FAST_BRANCHES=OFF -DNES6502_FAST_OPERAND_BYTES=OFF -DNES6502_FAST_MEMOPS=OFF -DNES6502_JMP_SPIN=OFF -DNES6502_LINEAR_ROM=OFF -DNES6502_TCMHOT_PROBE=OFF -DNES6502_TCMHOT_CORE=OFF -DNES6502_TCMHOT_CORE_STATS=OFF -DNES_RAM_DTCM=OFF -DNES6502_HOT_CLUSTER=OFF -DDTCM_POOL_SCAN=OFF -DPPU_SPRITE_LIVE_CHR=OFF -DNES_IRQ_MAPPER_BATCH=OFF
+BASE_FLAGS = -DCMAKE_BUILD_TYPE=Release -DAUDIO=ON -DAUDIO_DIRECT_RING=ON -DDIAG=OFF -DDIAG_FPS_ONLY=OFF -DPPU_BG=ON -DPPU_SPRITES=ON -DPPU_BLIT=ON -DPPU_FAST_STRIKE=OFF -DPPU_SPRITE_CACHE_DRAW_ONLY=OFF -DPPU_FAST_OAMDMA=OFF -DNES_FIXED_SCANLINE_CYCLES=OFF -DALIGN_PRG_ROM=OFF -DDIAG_CPU_EXEC_TIMING=OFF -DNES_CPU_BATCH_SCANLINES=1 -DNES_CPU_CYCLE_PERCENT=100 -DNES6502_OPT_LEVEL=O3 -DNES6502_JUMPTABLE_DISPATCH=OFF -DNES6502_LAZY_CYCLES=OFF -DNES6502_ALIGN_LOOPS=OFF -DNES6502_SPINHACK=OFF -DNES6502_OPPROFILE=OFF -DNES6502_FAST_PC_OPS=OFF -DNES6502_HOTOPS=OFF -DNES6502_FAST_MEMIO=OFF -DNES6502_DIRECT_MEMIO=OFF -DNES6502_FAST_JMP_ABS=OFF -DNES6502_FAST_BNE=OFF -DNES6502_FAST_BPL=OFF -DNES6502_FAST_BEQ=OFF -DNES6502_FAST_BRANCHES=OFF -DNES6502_FAST_OPERAND_BYTES=OFF -DNES6502_FAST_MEMOPS=OFF -DNES6502_JMP_SPIN=OFF -DNES6502_LINEAR_ROM=OFF -DNES6502_TCMHOT_PROBE=OFF -DNES6502_TCMHOT_CORE=OFF -DNES6502_TCMHOT_CORE_STATS=OFF -DNES_RAM_DTCM=OFF -DNES6502_HOT_CLUSTER=OFF -DDTCM_POOL_SCAN=OFF -DPPU_SPRITE_LIVE_CHR=OFF -DNES_IRQ_MAPPER_BATCH=OFF -DNES6502_PRGPROFILE=OFF -DNES_PRG_DTCM=OFF
 FAST_FLAGS = $(BASE_FLAGS) -DPPU_FAST_OAMDMA=ON -DNES_CPU_BATCH_SCANLINES=16 -DNES6502_DIRECT_MEMIO=ON -DNES6502_FAST_JMP_ABS=ON -DNES6502_LAZY_CYCLES=ON -DNES6502_FAST_BNE=ON -DNES6502_FAST_BPL=ON -DNES6502_FAST_BEQ=ON -DNES6502_FAST_MEMOPS=ON -DNES_RAM_DTCM=ON -DNES_IRQ_MAPPER_BATCH=ON
 FLAGS ?= $(FAST_FLAGS)
 PROBE_FLAGS ?= $(BASE_FLAGS)
@@ -15,7 +15,7 @@ FASTSTRIKE_BATCH ?= 32
 FASTBATCH ?= 24
 CYCLEPCT ?= 96
 
-.PHONY: all perf device sim clean rebuild diag diag-fast install-diag-fast diag-dtcmram install-diag-dtcmram diag-hotcluster install-diag-hotcluster diag-dtcmscan install-diag-dtcmscan diag-livechr install-diag-livechr diag-irqbatch install-diag-irqbatch diag-batchcpu diag-fastbatch diag-skipcache diag-fastoamdma diag-fpslite diag-cycletrim diag-jumptable diag-lazycycles diag-fixedcycles diag-faststrike diag-alignrom diag-cpuopt diag-cpualign diag-spinhack diag-cpusplit diag-opprofile diag-tcmhot diag-tcmcore diag-tcmstats diag-fastpc diag-hotops diag-fastmem diag-directmem diag-fastjmp diag-fastbne diag-fastbpl diag-fastbeq diag-fastbranch diag-fastopbyte diag-fastmemops diag-jmpspin diag-linearrom diag-nobg diag-nosprites diag-noblit diag-noaudio \
+.PHONY: all perf device sim clean rebuild diag diag-fast install-diag-fast diag-dtcmram install-diag-dtcmram diag-hotcluster install-diag-hotcluster diag-dtcmscan install-diag-dtcmscan diag-livechr install-diag-livechr diag-irqbatch install-diag-irqbatch diag-prgprof install-diag-prgprof diag-prgdtcm install-diag-prgdtcm diag-batchcpu diag-fastbatch diag-skipcache diag-fastoamdma diag-fpslite diag-cycletrim diag-jumptable diag-lazycycles diag-fixedcycles diag-faststrike diag-alignrom diag-cpuopt diag-cpualign diag-spinhack diag-cpusplit diag-opprofile diag-tcmhot diag-tcmcore diag-tcmstats diag-fastpc diag-hotops diag-fastmem diag-directmem diag-fastjmp diag-fastbne diag-fastbpl diag-fastbeq diag-fastbranch diag-fastopbyte diag-fastmemops diag-jmpspin diag-linearrom diag-nobg diag-nosprites diag-noblit diag-noaudio \
 	install install-diag install-diag-nobg install-diag-nosprites install-diag-noblit \
 	install-diag-noaudio install-diag-batchcpu install-diag-fastbatch install-diag-skipcache install-diag-fastoamdma install-diag-fpslite install-diag-cycletrim install-diag-jumptable install-diag-lazycycles install-diag-fixedcycles install-diag-faststrike install-diag-alignrom install-diag-cpuopt install-diag-cpualign install-diag-spinhack install-diag-cpusplit install-diag-opprofile install-diag-tcmhot install-diag-tcmcore install-diag-tcmstats install-diag-fastpc install-diag-hotops install-diag-fastmem install-diag-directmem install-diag-fastjmp install-diag-fastbne install-diag-fastbpl install-diag-fastbeq install-diag-fastbranch install-diag-fastopbyte install-diag-fastmemops install-diag-jmpspin install-diag-linearrom
 
@@ -61,6 +61,23 @@ diag-hotcluster:
 	cmake -B build/sim $(FAST_FLAGS) -DDIAG=ON -DNES6502_HOT_CLUSTER=ON
 	cmake --build build/sim
 
+# Probe: mirror the hottest PRG page ($C000) into DTCM (relocate-on-map) on the
+# fast line. Logs [prgdtcm] copies= — ~1 means page C is fixed (ideal).
+diag-prgdtcm:
+	cmake -B build/device -DTOOLCHAIN=armgcc -DCMAKE_TOOLCHAIN_FILE=$(TOOLCHAIN) $(FAST_FLAGS) -DDIAG=ON -DNES_PRG_DTCM=ON
+	cmake --build build/device
+	cmake -B build/sim $(FAST_FLAGS) -DDIAG=ON -DNES_PRG_DTCM=ON
+	cmake --build build/sim
+
+# Probe: histogram executed instructions per 4KB PRG page on the fast line.
+# Logs [prgprof] per-mille shares for pages 8-F ($8000-$FFFF) — finds whether
+# hot code concentrates in a few fixed pages worth relocating to DTCM.
+diag-prgprof:
+	cmake -B build/device -DTOOLCHAIN=armgcc -DCMAKE_TOOLCHAIN_FILE=$(TOOLCHAIN) $(FAST_FLAGS) -DDIAG=ON -DNES6502_PRGPROFILE=ON
+	cmake --build build/device
+	cmake -B build/sim $(FAST_FLAGS) -DDIAG=ON -DNES6502_PRGPROFILE=ON
+	cmake --build build/sim
+
 # Probe: batch CPU across IRQ-free scanlines for hblank-IRQ mappers (MMC3) using
 # the mapper IRQ countdown — targets the Kirby/SMB3/Batman per-scanline cliff.
 diag-irqbatch:
@@ -81,9 +98,9 @@ diag-livechr:
 # frame) with sentinels, report the largest clean run every 600 frames. Play a
 # full level; the final clean run is the real safe pool for RAM/hot-core use.
 diag-dtcmscan:
-	cmake -B build/device -DTOOLCHAIN=armgcc -DCMAKE_TOOLCHAIN_FILE=$(TOOLCHAIN) $(FAST_FLAGS) -DDIAG=ON -DDTCM_POOL_SCAN=ON
+	cmake -B build/device -DTOOLCHAIN=armgcc -DCMAKE_TOOLCHAIN_FILE=$(TOOLCHAIN) $(FAST_FLAGS) -DDIAG=ON -DDTCM_POOL_SCAN=ON -DNES_RAM_DTCM=OFF -DNES_PRG_DTCM=OFF
 	cmake --build build/device
-	cmake -B build/sim $(FAST_FLAGS) -DDIAG=ON -DDTCM_POOL_SCAN=ON
+	cmake -B build/sim $(FAST_FLAGS) -DDIAG=ON -DDTCM_POOL_SCAN=ON -DNES_RAM_DTCM=OFF -DNES_PRG_DTCM=OFF
 	cmake --build build/sim
 
 # Probe: NES 2KB work RAM in the DTCM stack pool (zero-wait-state data) on the
@@ -216,17 +233,18 @@ diag-tcmhot:
 	cmake --build build/sim
 
 # Run a tiny DTCM hot-opcode core before falling back to the full interpreter.
+# DTCM hot core on the promoted fast line (per-instruction-fallback design).
 diag-tcmcore:
-	cmake -B build/device -DTOOLCHAIN=armgcc -DCMAKE_TOOLCHAIN_FILE=$(TOOLCHAIN) $(PROBE_FLAGS) -DDIAG=ON -DPPU_FAST_OAMDMA=ON -DNES_CPU_BATCH_SCANLINES=16 -DNES6502_OPT_LEVEL=O3 -DNES6502_DIRECT_MEMIO=ON -DNES6502_FAST_JMP_ABS=ON -DNES6502_LAZY_CYCLES=ON -DNES6502_FAST_BNE=ON -DNES6502_FAST_BPL=ON -DNES6502_FAST_BEQ=ON -DNES6502_TCMHOT_CORE=ON
+	cmake -B build/device -DTOOLCHAIN=armgcc -DCMAKE_TOOLCHAIN_FILE=$(TOOLCHAIN) $(FAST_FLAGS) -DDIAG=ON -DNES6502_TCMHOT_CORE=ON
 	cmake --build build/device
-	cmake -B build/sim $(PROBE_FLAGS) -DDIAG=ON -DPPU_FAST_OAMDMA=ON -DNES_CPU_BATCH_SCANLINES=16 -DNES6502_OPT_LEVEL=O3 -DNES6502_DIRECT_MEMIO=ON -DNES6502_FAST_JMP_ABS=ON -DNES6502_LAZY_CYCLES=ON -DNES6502_FAST_BNE=ON -DNES6502_FAST_BPL=ON -DNES6502_FAST_BEQ=ON -DNES6502_TCMHOT_CORE=ON
+	cmake -B build/sim $(FAST_FLAGS) -DDIAG=ON -DNES6502_TCMHOT_CORE=ON
 	cmake --build build/sim
 
-# Attribute how many cycles the tiny DTCM core handles before fallback.
+# Same, plus stats: logs inline (DTCM) vs per-instruction-fallback cycle split.
 diag-tcmstats:
-	cmake -B build/device -DTOOLCHAIN=armgcc -DCMAKE_TOOLCHAIN_FILE=$(TOOLCHAIN) $(PROBE_FLAGS) -DDIAG=ON -DPPU_FAST_OAMDMA=ON -DNES_CPU_BATCH_SCANLINES=16 -DNES6502_OPT_LEVEL=O3 -DNES6502_DIRECT_MEMIO=ON -DNES6502_FAST_JMP_ABS=ON -DNES6502_LAZY_CYCLES=ON -DNES6502_FAST_BNE=ON -DNES6502_FAST_BPL=ON -DNES6502_FAST_BEQ=ON -DNES6502_TCMHOT_CORE=ON -DNES6502_TCMHOT_CORE_STATS=ON
+	cmake -B build/device -DTOOLCHAIN=armgcc -DCMAKE_TOOLCHAIN_FILE=$(TOOLCHAIN) $(FAST_FLAGS) -DDIAG=ON -DNES6502_TCMHOT_CORE=ON -DNES6502_TCMHOT_CORE_STATS=ON
 	cmake --build build/device
-	cmake -B build/sim $(PROBE_FLAGS) -DDIAG=ON -DPPU_FAST_OAMDMA=ON -DNES_CPU_BATCH_SCANLINES=16 -DNES6502_OPT_LEVEL=O3 -DNES6502_DIRECT_MEMIO=ON -DNES6502_FAST_JMP_ABS=ON -DNES6502_LAZY_CYCLES=ON -DNES6502_FAST_BNE=ON -DNES6502_FAST_BPL=ON -DNES6502_FAST_BEQ=ON -DNES6502_TCMHOT_CORE=ON -DNES6502_TCMHOT_CORE_STATS=ON
+	cmake -B build/sim $(FAST_FLAGS) -DDIAG=ON -DNES6502_TCMHOT_CORE=ON -DNES6502_TCMHOT_CORE_STATS=ON
 	cmake --build build/sim
 
 # Use pc_ptr for hot operand fetches and avoid rebasing same-bank taken branches.
@@ -367,6 +385,8 @@ install-diag-hotcluster: diag-hotcluster _push
 install-diag-dtcmscan: diag-dtcmscan _push
 install-diag-livechr: diag-livechr _push
 install-diag-irqbatch: diag-irqbatch _push
+install-diag-prgprof: diag-prgprof _push
+install-diag-prgdtcm: diag-prgdtcm _push
 install-diag-nobg: diag-nobg _push
 install-diag-nosprites: diag-nosprites _push
 install-diag-noblit: diag-noblit _push

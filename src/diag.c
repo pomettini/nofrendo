@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "diag.h"
-#if defined(NES6502_OPPROFILE) || defined(NES6502_TCMHOT_CORE_STATS)
+#if defined(NES6502_OPPROFILE) || defined(NES6502_TCMHOT_CORE_STATS) || defined(NES6502_PRGPROFILE) || defined(NES_PRG_DTCM)
 #include "nes6502.h"
 #endif
 
@@ -313,6 +313,30 @@ static void diag_log_opcode_profile(void) {
 }
 #endif
 
+#ifdef NES6502_PRGPROFILE
+static void diag_log_prg_profile(void) {
+    uint32 counts[16];
+    uint32 total = 0;
+    nes6502_prg_profile_snapshot(counts, &total);
+    if (total == 0) return;
+
+    /* Per-PRG-page ($8000-$FFFF = pages 8-15) share of executed instructions,
+       in tenths of a percent. Shows whether execution concentrates in a few
+       fixed pages (good DTCM-relocation candidates) or spreads across 32KB. */
+    pd->system->logToConsole(
+        "[prgprof] total=%u p8=%u p9=%u pA=%u pB=%u pC=%u pD=%u pE=%u pF=%u (per-mille)",
+        (unsigned int) total,
+        (unsigned int) ((uint64_t) counts[8]  * 1000u / total),
+        (unsigned int) ((uint64_t) counts[9]  * 1000u / total),
+        (unsigned int) ((uint64_t) counts[10] * 1000u / total),
+        (unsigned int) ((uint64_t) counts[11] * 1000u / total),
+        (unsigned int) ((uint64_t) counts[12] * 1000u / total),
+        (unsigned int) ((uint64_t) counts[13] * 1000u / total),
+        (unsigned int) ((uint64_t) counts[14] * 1000u / total),
+        (unsigned int) ((uint64_t) counts[15] * 1000u / total));
+}
+#endif
+
 bool diag_ppu_bg_enabled(void) {
     return ppu_bg_enabled;
 }
@@ -477,8 +501,19 @@ void diag_frame_end(void) {
     diag_log_opcode_profile();
 #endif
 
+#ifdef NES6502_PRGPROFILE
+    diag_log_prg_profile();
+#endif
+
 #ifdef NES6502_TCMHOT_CORE_STATS
     diag_log_tcmcore_stats();
+#endif
+
+#if defined(NES_PRG_DTCM) && defined(TARGET_PLAYDATE) && defined(__ELF__)
+    /* total copies into DTCM since boot: ~1 if page C is a fixed bank (ideal),
+       growing fast if the mapper swaps it (relocation cost may then dominate). */
+    pd->system->logToConsole("[prgdtcm] copies=%u",
+                             (unsigned int) nes6502_prg_dtcm_copies());
 #endif
 
 #ifndef DIAG_FPS_ONLY

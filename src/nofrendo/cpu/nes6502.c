@@ -1681,6 +1681,37 @@ void nes6502_opcode_profile_snapshot(uint32 counts[256], uint32 *total)
 #define PROFILE_OPCODE(opcode)  ((void) 0)
 #endif
 
+#ifdef NES6502_PRGPROFILE
+/* Per-4KB-page execution histogram: counts instructions dispatched from each
+   mem_page index (0-15). Pages 8-15 are PRG ROM ($8000-$FFFF). Tells us whether
+   the executing code concentrates in a few fixed pages (DTCM-relocation
+   candidates) or is spread across the whole 32KB ROM. */
+static uint32 prg_page_exec[16];
+static uint32 prg_page_total = 0;
+
+#define PROFILE_PRG_PAGE(pc) \
+{ \
+   prg_page_exec[((pc) >> NES6502_BANKSHIFT) & 15]++; \
+   prg_page_total++; \
+}
+
+void nes6502_prg_profile_reset(void)
+{
+   memset(prg_page_exec, 0, sizeof(prg_page_exec));
+   prg_page_total = 0;
+}
+
+void nes6502_prg_profile_snapshot(uint32 counts[16], uint32 *total)
+{
+   memcpy(counts, prg_page_exec, sizeof(prg_page_exec));
+   if (total)
+      *total = prg_page_total;
+   nes6502_prg_profile_reset();
+}
+#else
+#define PROFILE_PRG_PAGE(pc)  ((void) 0)
+#endif
+
 
 /*
 ** Zero-page helper macros
@@ -1885,6 +1916,48 @@ static void mem_writebyte(uint32 address, uint8 value)
    bank_writebyte(address, value);
 }
 
+#if defined(NES_PRG_DTCM) && defined(TARGET_PLAYDATE) && defined(__ELF__)
+/* Mirror the hottest PRG page ($C000-$CFFF) into a fixed DTCM buffer so its
+   reads (the bulk of instruction/operand fetches per the prg-page profile) are
+   zero-wait and stop competing for the 16 KB D-cache. Relocate-on-map: called
+   from setcontext (every bank switch), so it is correct whether the mapper
+   fixes or swaps this page — a swap just re-copies. dest sits above the DTCM
+   NES-RAM block (0x7500-0x7d00), within the measured pool (..0x95a8). */
+#define NES_PRG_DTCM_DEST 0x20007D00u
+#define NES_PRG_DTCM_PAGE 12          /* $C000-$CFFF */
+#define NES_PRG_DTCM_OVERLAP 32u      /* mirror page 13's start for seam reads */
+static uint32 prg_dtcm_copies = 0;
+
+static void nes6502_relocate_hot_prg(void)
+{
+   uint8 *dest = (uint8 *)NES_PRG_DTCM_DEST;
+   uint8 *src  = cpu.mem_page[NES_PRG_DTCM_PAGE];
+
+   if (src == dest || src == null_page || NULL == src)
+      return;                       /* already mirrored, or no real bank here */
+
+   /* Manual word copy — memcpy's LDM/STM path hard-faults writing DTCM.
+      Source (ROM in cacheable SRAM) is const; only the destination is volatile.
+      Copy the 4KB page PLUS NES_PRG_DTCM_OVERLAP bytes of the NEXT page: page 13
+      ($D000) stays in ROM, so once page 12 moves to DTCM the two are no longer
+      contiguous. A 16-bit read straddling the $CFFF->$D000 seam reads
+      mem_page[12][0x1000], which must hold $D000's first byte — the overlap
+      provides it. (The source ROM is contiguous, so src[0x1000..] IS $D000.) */
+   {
+      const uint32 *s = (const uint32 *)src;
+      volatile uint32 *d = (volatile uint32 *)dest;
+      uint32 words = (NES6502_BANKSIZE + NES_PRG_DTCM_OVERLAP) / 4u;
+      uint32 i;
+      for (i = 0; i < words; i++)
+         d[i] = s[i];
+   }
+   cpu.mem_page[NES_PRG_DTCM_PAGE] = dest;
+   prg_dtcm_copies++;
+}
+
+uint32 nes6502_prg_dtcm_copies(void) { return prg_dtcm_copies; }
+#endif
+
 /* set the current context */
 void nes6502_setcontext(nes6502_context *context)
 {
@@ -1900,6 +1973,10 @@ void nes6502_setcontext(nes6502_context *context)
       if (NULL == cpu.mem_page[loop])
          cpu.mem_page[loop] = null_page;
    }
+
+#if defined(NES_PRG_DTCM) && defined(TARGET_PLAYDATE) && defined(__ELF__)
+   nes6502_relocate_hot_prg();
+#endif
 
    ram = cpu.mem_page[0];  /* quick zero-page/RAM references */
    stack = ram + STACK_OFFSET;
@@ -1986,6 +2063,9 @@ uint32 nes6502_getcycles(bool reset_flag)
 #ifdef NES6502_TCMHOT_CORE
 static int (*nes6502_execute_fallback_ptr)(int total_cycles) = NULL;
 static int (*tcmhot_core_ptr)(int total_cycles) = NULL;
+/* Per-call split: cycles the last core invocation ran via per-instruction
+   fallback (slow). done - this = cycles run inline in DTCM. Coverage signal. */
+static int tcmhot_core_last_fallback = 0;
 static nes6502_tcmhot_core_status_t tcmhot_core_status;
 #ifdef NES6502_TCMHOT_CORE_STATS
 static nes6502_tcmhot_core_stats_t tcmhot_core_stats;
@@ -1995,6 +2075,8 @@ static int NES6502_TCMHOT tcmhot_core_execute(int timeslice_cycles)
 {
    int remaining;
    int executed;
+   int fallback_cycles = 0;   /* cycles run by the slow per-instruction fallback */
+   int (*fallback)(int) = nes6502_execute_fallback_ptr;
    uint32 PC;
    uint8 A, X, Y, S;
    uint8 n_flag, v_flag, b_flag;
@@ -2005,6 +2087,8 @@ static int NES6502_TCMHOT tcmhot_core_execute(int timeslice_cycles)
 
    if (timeslice_cycles <= 0 || cpu.jammed || cpu.burn_cycles || cpu.int_pending)
       return 0;
+   if (NULL == fallback)
+      fallback = nes6502_execute;
 
    remaining = timeslice_cycles;
 
@@ -2061,6 +2145,28 @@ static int NES6502_TCMHOT tcmhot_core_execute(int timeslice_cycles)
       { \
          remaining -= 2; \
       } \
+   } while (0)
+
+/* Sync DTCM-core locals out to the cpu struct (before a fallback call). */
+#define TCM_FLUSH() \
+   do { \
+      cpu.pc_reg = PC; \
+      cpu.a_reg = A; cpu.x_reg = X; cpu.y_reg = Y; cpu.s_reg = S; \
+      cpu.p_reg = (n_flag & N_FLAG) | (v_flag ? V_FLAG : 0) | R_FLAG \
+                | (b_flag ? B_FLAG : 0) | (d_flag ? D_FLAG : 0) \
+                | (i_flag ? I_FLAG : 0) | (z_flag ? 0 : Z_FLAG) | c_flag; \
+   } while (0)
+
+/* Reload DTCM-core locals from the cpu struct (after a fallback call). */
+#define TCM_RELOAD() \
+   do { \
+      PC = cpu.pc_reg; \
+      A = cpu.a_reg; X = cpu.x_reg; Y = cpu.y_reg; S = cpu.s_reg; \
+      n_flag = cpu.p_reg & N_FLAG; v_flag = cpu.p_reg & V_FLAG; \
+      b_flag = cpu.p_reg & B_FLAG; d_flag = cpu.p_reg & D_FLAG; \
+      i_flag = cpu.p_reg & I_FLAG; z_flag = (0 == (cpu.p_reg & Z_FLAG)); \
+      c_flag = cpu.p_reg & C_FLAG; \
+      TCM_REBASE(); \
    } while (0)
 
    PC = cpu.pc_reg;
@@ -2153,9 +2259,36 @@ static int NES6502_TCMHOT tcmhot_core_execute(int timeslice_cycles)
       {
          TCM_BRANCH(0 == (n_flag & N_FLAG));
       }
+      else if (0x4C == op) /* JMP $nnnn — dominant idle/control opcode */
+      {
+         if (__builtin_expect((pc_bank_end - pc_ptr) < 3, 0))
+            goto tcm_cold;
+         PC = (uint32)pc_ptr[1] | ((uint32)pc_ptr[2] << 8);
+         TCM_REBASE();
+         remaining -= 3;
+      }
       else
       {
-         break;
+tcm_cold:
+         /* Uncovered or IO-touching opcode: execute exactly ONE instruction in
+            the full interpreter (correct flags/cycles/PPU timing), then resume
+            the DTCM loop. Keeps the hot path resident in fast memory instead of
+            bailing the whole slice to slow RAM (the old hit=0 failure). */
+         TCM_FLUSH();
+         {
+            int adv = fallback(1);
+            remaining -= adv;
+            fallback_cycles += adv;
+         }
+         if (cpu.jammed || cpu.burn_cycles || cpu.int_pending)
+         {
+            /* interrupt/jam/DMA pending — let normal scheduling take over */
+            executed = timeslice_cycles - remaining;
+            cpu.total_cycles += (executed - fallback_cycles);
+            tcmhot_core_last_fallback = fallback_cycles;
+            return executed;
+         }
+         TCM_RELOAD();
       }
    }
 
@@ -2177,10 +2310,15 @@ tcm_done:
       | (i_flag ? I_FLAG : 0)
       | (z_flag ? 0 : Z_FLAG)
       | c_flag;
-   cpu.total_cycles += executed;
+   /* fallback() already committed its own cycles to total_cycles; add only the
+      cycles this core executed inline. */
+   cpu.total_cycles += (executed - fallback_cycles);
+   tcmhot_core_last_fallback = fallback_cycles;
 
    return executed;
 
+#undef TCM_RELOAD
+#undef TCM_FLUSH
 #undef TCM_BRANCH
 #undef TCM_FETCH_2
 #undef TCM_COMPARE
@@ -2201,23 +2339,33 @@ static int nes6502_tcmhot_execute(int timeslice_cycles)
    tcmhot_core_stats.calls++;
 #endif
 
+   tcmhot_core_last_fallback = 0;
    if (tcmhot_core_ptr)
       done = tcmhot_core_ptr(timeslice_cycles);
 
 #ifdef NES6502_TCMHOT_CORE_STATS
-   if (done > 0)
+   /* The core now drives the whole slice (inline + per-instruction fallback).
+      core_cycles = cycles run inline in DTCM; fallback_cycles = cycles run via
+      the slow per-instruction fallback. Their ratio is the real coverage. */
    {
-      tcmhot_core_stats.hit_calls++;
-      tcmhot_core_stats.core_cycles += (uint32)done;
-      if ((uint32)done > tcmhot_core_stats.max_core_run)
-         tcmhot_core_stats.max_core_run = (uint32)done;
-   }
-   else
-   {
-      tcmhot_core_stats.miss_calls++;
+      int core_inline = done - tcmhot_core_last_fallback;
+      if (core_inline > 0)
+      {
+         tcmhot_core_stats.hit_calls++;
+         tcmhot_core_stats.core_cycles += (uint32)core_inline;
+         if ((uint32)core_inline > tcmhot_core_stats.max_core_run)
+            tcmhot_core_stats.max_core_run = (uint32)core_inline;
+      }
+      else
+      {
+         tcmhot_core_stats.miss_calls++;
+      }
+      if (tcmhot_core_last_fallback > 0)
+         tcmhot_core_stats.fallback_cycles += (uint32)tcmhot_core_last_fallback;
    }
 #endif
 
+   /* Core bailed early (interrupt/jam/DMA) — finish the slice normally. */
    if (done < timeslice_cycles)
    {
       fallback_done = fallback(timeslice_cycles - done);
@@ -2433,9 +2581,11 @@ int nes6502_execute(int timeslice_cycles)
          _op = *pc_ptr++;
          PC++;
          PROFILE_OPCODE(_op);
+         PROFILE_PRG_PAGE(PC);
          switch (_op)
          {
 #else
+      PROFILE_PRG_PAGE(PC);
       switch (bank_readbyte(PC++))
       {
 #endif /* NES6502_PC_PTR */
@@ -3688,7 +3838,7 @@ void nes6502_tcmhot_core_init(void (*clear_icache)(void))
 {
 #if defined(__ELF__) && defined(TARGET_PLAYDATE)
    extern char __tcmhot_start[], __tcmhot_end[];
-   uintptr_t source, end, size, frame, pool_top, dest, entry_offset;
+   uintptr_t source, end, size, frame, dest, entry_offset;
    const uint32 *src;
    volatile uint32 *dst;
    uint32 i;
@@ -3709,12 +3859,13 @@ void nes6502_tcmhot_core_init(void (*clear_icache)(void))
       return;
    }
 
+   /* Fixed placement above the DTCM NES-RAM block (measured pool, not the old
+      frame-derived guess that straddled the firmware floor). */
    frame = (uintptr_t)__builtin_frame_address(0);
-   pool_top = (frame - 0x2180u) & ~(uintptr_t)0x0f;
-   dest = (pool_top - size) & ~(uintptr_t)0x0f;
+   dest = NES6502_TCMHOT_CORE_DEST;
    tcmhot_core_status.frame = (uint32)frame;
    tcmhot_core_status.dest = (uint32)dest;
-   if (dest < 0x20000000u || (dest + size) > 0x20010000u)
+   if (dest < 0x20000000u || (dest + size) > 0x200095a8u)
    {
       tcmhot_core_status.status = 2;
       return;

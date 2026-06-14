@@ -2664,6 +2664,135 @@ keep `irq_countdown=NULL` → unchanged, so only MMC3 titles change behavior in 
   proof) still needs an explicit eyeball; if a split ever jitters by a line, tune
   `map4_irq_countdown`. No artifact reported in the validation session.
 
+### DTCM hot core, per-instruction-fallback redesign - probe built 2026-06-13
+
+The original `NES6502_TCMHOT_CORE` (diag-tcmcore, May) relocated a 9-opcode core to DTCM
+but measured `hit=0` — it handled zero cycles in real gameplay. Root cause diagnosis this
+round (two bugs):
+
+1. **Hot set too small / missing control flow.** It lacked `4C` (JMP absolute) — the single
+   most frequent opcode — so any loop hit an uncovered op within a few instructions.
+2. **Catastrophic fallback shape.** On any uncovered op it `break`-ed and handed the *entire
+   rest of the slice* (a 16-scanline batch ≈ 1900 instructions) to the slow interpreter. One
+   early cold op ⇒ core did nothing ⇒ `hit=0`.
+
+Redesign (this probe):
+
+- **Placement fixed to the measured pool.** Core copied to a fixed `0x20007D00` (above the
+  DTCM NES-RAM block at 0x7500-0x7D00), not the old frame-derived `frame-0x2180` that
+  straddled the firmware floor. Bounds-checked against the 0x200095a8 stack watermark.
+  Section measured 992 bytes (cap 4096, pool room 6312).
+- **Per-instruction fallback (the key fix).** On an uncovered or IO-touching opcode the core
+  executes exactly ONE instruction via the full interpreter (`fallback(1)`), then RESUMES its
+  DTCM loop — instead of bailing the whole slice. The hot path stays resident in fast memory.
+- **No timing hazard.** All IO/PPU-touching ops (incl. `$2002` sprite-0 reads) go through the
+  fallback, which keeps the lazy-cycle live-timing path intact. The DTCM core only ever runs
+  ops that touch RAM/ROM/registers — no `nes6502_getcycles` dependency inline.
+- **Relocation-safe.** objdump confirms the only outbound transfer from the DTCM section is
+  `blx r3` (indirect fallback pointer, valid at any distance). No direct `bl`/`b.w` leaves
+  the section; globals resolve via `.rel.text` (the `.tcmhot`-inside-`.text` linker fix).
+- Cycle accounting verified: core adds only its inline cycles to `total_cycles`; fallback
+  commits its own; no double-count. Return = total consumed.
+
+This iteration adds only `4C` to the inline set (the dominant idle/control opcode) on top of
+the existing tested ops {INY,LSR,CMP#,LDA#,LDA zp,STA zp,BNE,BEQ,BPL} — minimal correctness
+surface. The architectural fix is the per-instruction fallback.
+
+**Device result (build 2026-06-13 22:03:45, FAST_FLAGS + tcmstats): REJECTED — principled
+negative. The DTCM hot-core lever does not transfer to FamiCrank.**
+
+The redesign WORKS (the per-instruction fallback fixed the `hit=0` failure), but it does not
+pay off:
+
+| | Mario 1-1 | Kirby (MMC3) |
+|---|---|---|
+| Coverage (`pct`) | 0% (core never engages; plays perfectly) | **71%** inline in DTCM |
+| Speed vs prior baseline | unchanged 44-50 fps | **REGRESSED** 25-37 vs 34-44 fps (irq_batch) |
+
+The `[tcmcore]` Kirby line, e.g. `core=1333296 fallback=453546 pct=74 max=1821` — the core
+genuinely ran 71-74% of cycles inline in DTCM and was *still slower*. That is the decisive
+data point, and it explains why this whole technique is wrong for us:
+
+1. **Our interpreter already fits the 16 KB I-cache** (~13 KB with LEGAL_ONLY). vecx's 6809
+   core was ~20 KB and could NOT fit — they had constant I-cache eviction that relocation
+   relieved. **We have no such eviction to relieve, so the core benefit vecx measured simply
+   doesn't exist for us.** This is the root reason the +13-15% does not transfer.
+2. **The naive if-else DTCM core is slower per opcode than the main `switch`** — which carries
+   FAST_MEMOPS, FAST_JMP_ABS, the branch fast paths, and jump-table-class dispatch the small
+   core lacks. Even "covered" ops run slower relocated.
+3. **Per-instruction fallback double-marshals** the register file on every cold op (TCM_FLUSH
+   + the fallback's own GET/STORE + TCM_RELOAD): ~40 cyc × ~8700 cold ops/frame ≈ 2 ms/frame
+   on Kirby — directly the measured regression.
+
+Correctness note: Mario played identically and the redesign is sound (no desync) — the
+per-instruction fallback is a *correct* design, just not a faster one here. The reshaped
+core + measured-pool placement are kept behind `NES6502_TCMHOT_CORE` (OFF in BASE/FAST) as
+reference infrastructure; **do not promote**. This closes the DTCM-hot-core line: the
+prerequisite (an interpreter that overflows I-cache) is absent in this project.
+
+**Net for IRQ-mapper games (Kirby/Batman): the IRQ-mapper batching (promoted) remains the
+win; the hot core does not add to it.** The remaining gap on those heavy MMC3 engines is
+diffuse D-cache + real 6502 work — the same floor as Mario, just hit harder.
+
+### PRG-page execution profile + hot-page DTCM relocation - 2026-06-14
+
+Reframing after the hot-core failure: every TCM attempt so far relocated *code* (I-cache).
+The actual bottleneck is *data* — the NES program is read by our interpreter via
+`mem_page[...]` from cache-backed SRAM, so opcode/operand fetches are **D-cache** traffic
+(32 KB PRG vs 16 KB D-cache). New profiler `NES6502_PRGPROFILE` (`make diag-prgprof`)
+histograms executed instructions per 4 KB PRG page.
+
+**Kirby full level 1 result (per-mille of executed instructions):**
+
+| Window type | p8 | p9 | pA | pB | **pC** | pD | pE | pF |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|
+| Light/fast (45-49 fps) | ~60 | ~5 | ~15 | ~5 | **720-840** | ~100 | ~10 | ~15 |
+| Slow (30-35 fps) | ~120 | ~55 | ~15 | ~8 | **400-550** | ~130 | ~85 | ~120 |
+
+- **Page C ($C000-$CFFF) dominates: 72-84% in calm scenes, ~40-55% in the slow ones.**
+- The slow windows show the working set *spreading* (p8/p9/pD/pE/pF all rise as pC falls) —
+  the D-cache thrash mechanism captured directly: busy gameplay touches more code pages,
+  overflowing the 16 KB D-cache.
+- Strong GO signal for relocating page C (and maybe pC+pD) to DTCM. Caveat: the slow-window
+  spread means even pC+pD (~52%) leaves ~48% still thrashing, so expect partial relief.
+
+**Relocation probe built (`NES_PRG_DTCM`, `make diag-prgdtcm`):** mirror page C (4 KB) into a
+fixed DTCM buffer at 0x20007D00 (above the NES-RAM block, within the measured pool).
+**Relocate-on-map**: `nes6502_setcontext` (the single chokepoint every bank switch flows
+through) copies whatever ROM bank is mapped to page C into the DTCM buffer and repoints
+`cpu.mem_page[12]` at it — correct whether the page is a fixed or swappable MMC3 bank (a swap
+just re-copies). Manual word-copy (memcpy's LDM/STM hard-faults writing DTCM); source const,
+dest volatile. `[prgdtcm] copies=` logs the count: **~1 = page C is a fixed bank (ideal);
+growing fast = the mapper swaps it and re-copy cost may eat the win.**
+
+**Device results (2026-06-14):**
+
+1. First mirror build: Mario perfect (`copies=1`), but **Kirby white-screened entering the
+   level**. Hypothesised a stack collision; **disproven by a Kirby stack scan** — Kirby's
+   watermark is 0x20009438, 1848 bytes ABOVE the buffer top (0x8D00). The buffer was never
+   touched. Real cause: relocating page 12 alone left it non-contiguous with page 13 ($D000,
+   still ROM), so a 16-bit read straddling the $CFFF->$D000 seam got a garbage high byte.
+   Mario never lands on that seam; Kirby (72-84% from this bank) does → corrupted jump → white
+   screen. **Fix: mirror page 12 + 32 bytes of page 13's start** (`NES_PRG_DTCM_OVERLAP`) so
+   seam word-reads resolve correctly.
+
+2. Seam-fixed build: **Kirby runs the full level, no white screen, `copies=1`, no glitches.**
+   Correctness solved. **But the speed is FLAT** — no measurable gain:
+   - Mario: `cpu_only` 12-18 ms busy, 49-50 fps — identical to baseline (already fps-capped).
+   - Kirby: busy windows 33-39 fps / `cpu_only` 21-25 ms vs the irq_batch baseline's 34-44 /
+     17-24 — within noise, if anything a hair higher (the per-bank-switch relocation check).
+
+**REJECTED — principled negative, same wall as the hot core.** The hottest page is already
+D-cache-resident by definition (page C is so constantly accessed that LRU keeps it cached, so
+its reads were already ~1-cycle hits). Relocating an already-cached page to DTCM buys nearly
+nothing. The D-cache *misses* are on the **diffuse spread** of the other pages (p8/p9/pD/pE/pF)
+that light up in busy scenes — 45-55% of busy-window fetches, too many and too spread to fit
+in the ~6 KB DTCM pool. This is the third fast-memory data/code relocation to come back flat
+for the same reason (after the DTCM cpu-struct and the hot core): **the hot working set is
+already cached; the cold misses are diffuse and don't fit fast memory.** The fast-memory
+avenue for the CPU bottleneck is exhausted. `NES_PRG_DTCM` stays an OFF probe flag; the
+profiler (`NES6502_PRGPROFILE`) and the seam-overlap technique are kept as reference.
+
 ### Background tile CHR cache — only if DTCM becomes available
 
 The 4 KB `bg_tile_cache[256][8]` approach was tried and **caused regression** (see failures

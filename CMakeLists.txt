@@ -93,6 +93,8 @@ option(NES6502_LAZY_CYCLES "Commit total CPU cycles once per execute slice inste
 option(NES6502_ALIGN_LOOPS "Align 6502 hot loops for performance experiments" OFF)
 option(NES6502_SPINHACK "Fast-forward selected PPUSTATUS polling loops" OFF)
 option(NES6502_OPPROFILE "Count executed 6502 opcodes in diagnostic windows" OFF)
+option(NES6502_PRGPROFILE "Histogram executed instructions per 4KB PRG page (DTCM-relocation candidate finder)" OFF)
+option(NES_PRG_DTCM "Mirror the hottest PRG page ($C000) into DTCM via relocate-on-map" OFF)
 option(NES6502_FAST_PC_OPS "Use pc_ptr for operand fetches and same-bank branches" OFF)
 option(NES6502_HOTOPS "Hand-specialize the hottest measured 6502 opcodes" OFF)
 option(NES6502_FAST_MEMIO "Bypass generic memory-handler scans for NES RAM mirror ranges" OFF)
@@ -161,6 +163,8 @@ set(GAME_DEFINES
     $<$<BOOL:${NES6502_ALIGN_LOOPS}>:NES6502_ALIGN_LOOPS=1>
     $<$<BOOL:${NES6502_SPINHACK}>:NES6502_SPINHACK=1>
     $<$<BOOL:${NES6502_OPPROFILE}>:NES6502_OPPROFILE=1>
+    $<$<BOOL:${NES6502_PRGPROFILE}>:NES6502_PRGPROFILE=1>
+    $<$<BOOL:${NES_PRG_DTCM}>:NES_PRG_DTCM=1>
     $<$<BOOL:${NES6502_FAST_PC_OPS}>:NES6502_FAST_PC_OPS=1>
     $<$<BOOL:${NES6502_HOTOPS}>:NES6502_HOTOPS=1>
     $<$<BOOL:${NES6502_FAST_MEMIO}>:NES6502_FAST_MEMIO=1>
