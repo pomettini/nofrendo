@@ -34,9 +34,9 @@ static void set_button_state(int evt, bool *down, bool should_be_down) {
     *down = should_be_down;
 }
 
-static void update_crank_buttons(void) {
-    bool select_down = false;
-    bool start_down  = false;
+static void compute_crank_buttons(bool *select_down, bool *start_down) {
+    *select_down = false;
+    *start_down  = false;
 
     if (!pd->system->isCrankDocked()) {
         float angle = pd->system->getCrankAngle();
@@ -45,17 +45,25 @@ static void update_crank_buttons(void) {
         while (angle >= 360.0f)
             angle -= 360.0f;
 
-        select_down = angle < 60.0f;
-        start_down  = angle > 180.0f;
+        *select_down = angle < 60.0f;
+        *start_down  = angle > 180.0f;
     }
+}
+
+static void update_crank_buttons(void) {
+    bool select_down, start_down;
+    compute_crank_buttons(&select_down, &start_down);
 
     set_button_state(event_joypad1_select, &crank_select_down, select_down);
     set_button_state(event_joypad1_start, &crank_start_down, start_down);
 }
 
 void osd_input_init(void) {
-    crank_start_down = false;
-    crank_select_down = false;
+    /* Baseline the crank to its current resting position so a ROM that loads
+       while the crank sits in the Start/Select zone doesn't fire a phantom
+       press. Start/Select only register when the crank is actively moved into
+       the zone afterwards. */
+    compute_crank_buttons(&crank_select_down, &crank_start_down);
 }
 
 void osd_getinput(void) {

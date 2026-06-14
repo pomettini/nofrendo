@@ -22,6 +22,8 @@ extern int osd_get_frame_skip(void);
 extern void osd_set_frame_skip(int skip);
 extern int osd_get_show_fps(void);
 extern void osd_set_show_fps(int enabled);
+extern void osd_save_settings(void);
+extern void osd_load_settings(void);
 
 #if defined(NES6502_TCMHOT_PROBE) || defined(NES6502_TCMHOT_CORE)
 static void drain_console(void) {
@@ -106,13 +108,16 @@ static void menu_frameskip_changed(void *userdata) {
     /* Menu index 0 is "Auto" (osd FRAME_SKIP_AUTO = -1); 1..3 map to fixed 0..2 */
     int value = pd->system->getMenuItemValue(frameskip_menu_item);
     osd_set_frame_skip(value - 1);
+    osd_save_settings();
   }
 }
 
 static void menu_show_fps_changed(void *userdata) {
   (void)userdata;
-  if (show_fps_menu_item)
+  if (show_fps_menu_item) {
     osd_set_show_fps(pd->system->getMenuItemValue(show_fps_menu_item));
+    osd_save_settings();
+  }
 }
 
 static void clear_menu_handles(void) {
@@ -208,6 +213,7 @@ int eventHandler(PlaydateAPI *playdate, PDSystemEvent event, uint32_t arg) {
   if (event == kEventInit) {
     pd = playdate;
     pd->display->setRefreshRate(60.0f);
+    osd_load_settings(); /* restore saved Frameskip / Show FPS preferences */
     nes6502_itcm_init(
         pd->system
             ->realloc); /* copy execute loop to ITCM before any NES init */

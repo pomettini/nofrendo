@@ -1,5 +1,6 @@
 #include <pd_api.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "diag.h"
@@ -175,6 +176,41 @@ int osd_get_show_fps(void) {
 
 void osd_set_show_fps(int enabled) {
     show_fps = enabled ? 1 : 0;
+}
+
+/* --- Persistent settings (saved to the game's data folder) ---------------- */
+
+#define SETTINGS_FILE "settings.cfg"
+
+void osd_save_settings(void) {
+    SDFile *f = pd->file->open(SETTINGS_FILE, kFileWrite);
+    if (!f)
+        return;
+    char buf[64];
+    int n = snprintf(buf, sizeof(buf), "frameskip=%d\nshowfps=%d\n",
+                     frame_skip, show_fps);
+    if (n > 0)
+        pd->file->write(f, buf, (unsigned int)n);
+    pd->file->close(f);
+}
+
+void osd_load_settings(void) {
+    SDFile *f = pd->file->open(SETTINGS_FILE, kFileRead | kFileReadData);
+    if (!f)
+        return;
+    char buf[128];
+    int n = pd->file->read(f, buf, sizeof(buf) - 1);
+    pd->file->close(f);
+    if (n <= 0)
+        return;
+    buf[n] = '\0';
+
+    const char *p = strstr(buf, "frameskip=");
+    if (p)
+        osd_set_frame_skip(atoi(p + 10));
+    p = strstr(buf, "showfps=");
+    if (p)
+        osd_set_show_fps(atoi(p + 8));
 }
 
 static int playdate_update(void *ud) {

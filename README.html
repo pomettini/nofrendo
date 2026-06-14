@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>FamiCrank for Playdate</title>
+</head>
+<body>
+
+<!-- ===== Copy from here for itch.io ===== -->
+
+<h1>FamiCrank for Playdate</h1>
+
+<p>A port of the <a href="https://en.wikipedia.org/wiki/Nofrendo">Nofrendo</a>
+<a href="https://en.wikipedia.org/wiki/Nintendo_Entertainment_System">NES</a> emulator
+to the Panic&reg; <a href="https://play.date/">Playdate&reg;</a>. Plays NES games
+(and homebrew). Mostly full speed, with a few slowdowns and minor glitches on
+demanding games.</p>
+
+<p><strong>ROMs are not included.</strong></p>
+
+<h2>Install</h2>
+
+<ol>
+  <li>Download <code>FamiCrank.pdx</code> from this page.</li>
+  <li>Sideload via <a href="https://play.date/account/sideload/">play.date/account</a>.</li>
+</ol>
+
+<h2>Adding ROMs</h2>
+
+<ol>
+  <li>Launch FamiCrank once. If you have no ROMs yet, you'll see a message with the folder path. The folder has been created.</li>
+  <li>Connect your Playdate to your computer via USB.</li>
+  <li>On the Playdate, go to <strong>Settings → System → Reboot into Data Disk Mode</strong>. The device mounts as a USB drive on your computer.</li>
+  <li>Copy your <code>.nes</code> ROM files into the <code>Games/Shared/Emulation/nes/games/</code> folder on the mounted drive.</li>
+  <li>Eject the drive and reboot the Playdate.</li>
+</ol>
+
+<h2>Saves</h2>
+
+<p>FamiCrank does not support saving (yet).</p>
+
+<h2>Controls</h2>
+
+<table>
+  <thead>
+    <tr><th>Playdate</th><th>NES</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>D-pad</td><td>D-pad</td></tr>
+    <tr><td>A</td><td>A</td></tr>
+    <tr><td>B</td><td>B</td></tr>
+    <tr><td>Crank pointing up</td><td>Select</td></tr>
+    <tr><td>Crank pointing down</td><td>Start</td></tr>
+  </tbody>
+</table>
+
+<h2>Options (found in Playdate system menu)</h2>
+
+<ul>
+  <li><strong>Frameskip</strong>: <code>Auto</code> (default) keeps things as smooth as possible and adjusts on its own. You can also pick a fixed amount if you prefer.</li>
+</ul>
+
+<h2>Credits</h2>
+
+<ul>
+  <li><strong>Nofrendo core</strong>: Matthew Conte (1998&ndash;2000).</li>
+  <li><strong>NES port base</strong>: <a href="https://github.com/nwagyu/nofrendo">nwagyu</a>.</li>
+  <li><strong>Playdate port</strong>: <a href="https://www.giorgiopomettini.eu/">Giorgio Pomettini</a>.</li>
+  <li><strong>Graphical assets</strong>: <a href="https://noemifrulio.itch.io/">Noemi Frulio</a>.</li>
+</ul>
+
+<p>Source code, roadmap and dev notes:
+<a href="https://github.com/pomettini/nofrendo">github.com/pomettini/nofrendo</a>.</p>
+
+<h2>License</h2>
+
+<p><a href="https://www.gnu.org/licenses/gpl-3.0.html">GPLv3</a>. See <code>LICENSE</code> inside the <code>.pdx</code> bundle.</p>
+
+<h2>Legal</h2>
+
+<p>FamiCrank for Playdate is a fan project. It is <strong>not affiliated with,
+endorsed by, or sponsored by Nintendo&reg; Co., Ltd.</strong> Nintendo&reg; and
+Nintendo Entertainment System&reg; are trademarks of Nintendo; all rights belong
+to their respective owners. Playdate&reg; is a registered trademark of Panic&reg;
+Inc., with whom this project is also unaffiliated.</p>
+
+<hr>
+
+<p>This Playdate port was developed with assistance from generative AI,
+specifically <a href="https://claude.com/claude-code">Claude Code</a>. Use of
+generative AI in the upstream Nofrendo emulator has not been disclosed.</p>
+
+<!-- ===== Copy until here for itch.io ===== -->
+
+</body>
+</html>
