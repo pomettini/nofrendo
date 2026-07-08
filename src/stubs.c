@@ -1,10 +1,29 @@
+#include <stdarg.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <gui.h>
 #include <vid_drv.h>
 
 void gui_tick(int ticks) {}
 void gui_setrefresh(int frequency) {}
-void gui_sendmsg(int color, char *format, ...) {}
+
+/* The core reports load failures (unsupported mapper, truncated/invalid image,
+   allocation failure) via gui_sendmsg(GUI_RED, ...). The UI has no GUI, so we
+   capture the last such message here and let main.c show it on screen instead
+   of failing silently back to the ROM picker. */
+static char gui_last_error[128];
+
+void gui_sendmsg(int color, char *format, ...) {
+  if (color != GUI_RED)
+    return;
+  va_list ap;
+  va_start(ap, format);
+  vsnprintf(gui_last_error, sizeof(gui_last_error), format, ap);
+  va_end(ap);
+}
+
+const char *osd_get_load_error(void) { return gui_last_error; }
+void osd_clear_load_error(void) { gui_last_error[0] = '\0'; }
 int  gui_init(void) { return 0; }
 void gui_shutdown(void) {}
 void gui_frame(bool draw) {}

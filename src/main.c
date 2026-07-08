@@ -24,6 +24,8 @@ extern int osd_get_show_fps(void);
 extern void osd_set_show_fps(int enabled);
 extern void osd_save_settings(void);
 extern void osd_load_settings(void);
+extern const char *osd_get_load_error(void);
+extern void osd_clear_load_error(void);
 
 #if defined(NES6502_TCMHOT_PROBE) || defined(NES6502_TCMHOT_CORE)
 static void drain_console(void) {
@@ -162,6 +164,58 @@ int app_return_to_picker_if_requested(void) {
   return 1;
 }
 
+/* Shown when a ROM fails to load, instead of silently dropping back to the
+   picker. Holds the reason reported by the core (e.g. "Mapper 71 not yet
+   implemented", "ROM image is truncated") until the user acknowledges it. */
+static char load_error_reason[128];
+static LCDFont *error_font = NULL;
+static LCDFont *error_bold_font = NULL;
+
+static void draw_centered(const char *text, LCDFont *font, int y) {
+  if (!font)
+    return;
+  pd->graphics->setFont(font);
+  int w = pd->graphics->getTextWidth(font, text, strlen(text), kUTF8Encoding, 0);
+  pd->graphics->drawText(text, strlen(text), kUTF8Encoding, (400 - w) / 2, y);
+}
+
+static int error_update(void *userdata) {
+  (void)userdata;
+
+  PDButtons pushed;
+  pd->system->getButtonState(NULL, &pushed, NULL);
+
+  if (!error_font) {
+    const char *err = NULL;
+    error_font =
+        pd->graphics->loadFont("/System/Fonts/Asheville-Sans-14-Light.pft", &err);
+    error_bold_font =
+        pd->graphics->loadFont("/System/Fonts/Asheville-Sans-14-Bold.pft", &err);
+  }
+
+  pd->graphics->clear(kColorWhite);
+  LCDFont *title_font = error_bold_font ? error_bold_font : error_font;
+  draw_centered("Could not load this ROM", title_font, 80);
+  if (error_font) {
+    pd->graphics->setFont(error_font);
+    pd->graphics->drawTextInRect(load_error_reason, strlen(load_error_reason),
+                                 kUTF8Encoding, 20, 115, 360, 60, kWrapWord,
+                                 kAlignTextCenter);
+  }
+  draw_centered("Press A to go back", error_font, 190);
+
+  if (pushed & kButtonA)
+    start_rom_picker();
+  return 1;
+}
+
+static void present_load_error(void) {
+  const char *reason = osd_get_load_error();
+  snprintf(load_error_reason, sizeof(load_error_reason), "%s",
+           (reason && reason[0]) ? reason : "The file could not be read.");
+  pd->system->setUpdateCallback(error_update, NULL);
+}
+
 static void launch_rom(const char *path, void *userdata) {
   (void)userdata;
 
@@ -174,14 +228,15 @@ static void launch_rom(const char *path, void *userdata) {
   clear_screen_to_black();
   install_emulator_menu();
 
+  osd_clear_load_error();
   char *argv[] = {"FamiCrank", selected_rom_path};
   int rc = nofrendo_main(2, argv);
   if (rc != 0) {
     pd->system->logToConsole("[rom] failed to launch %s (%d)",
                              selected_rom_path, rc);
+    present_load_error();
     emulator_started = 0;
     selected_rom_path[0] = '\0';
-    start_rom_picker();
   }
 }
 
