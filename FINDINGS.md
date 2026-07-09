@@ -5,6 +5,43 @@ optimization campaign that produced the 0.2 release: what shipped, why it
 works, what didn't, and where the ceiling is. The blow-by-blow log lives in
 `PERF.md`; this is the executive summary.
 
+## 0.3 — Post-launch fixes & features (2026-07)
+
+Follow-up release addressing user reports from the 0.2 launch. No changes to the
+emulation core or its performance; these are compatibility, UX, and feature work.
+
+- **ROM picker cap raised 256 → 1024** (pd-rom-picker submodule). A user with a
+  large collection saw only part of it: the picker stopped collecting at 256
+  files, and non-`.nes` files in the folder counted toward that cap too. The
+  list is heap-allocated and freed before emulation, so this has zero runtime
+  cost (only a one-time `qsort` at init; drawing only ever renders 10 rows).
+
+- **On-screen load-failure message.** Failed loads used to drop back to the
+  picker silently. The core already reports a precise reason via
+  `gui_sendmsg(GUI_RED, …)` (unsupported mapper, truncated/invalid image, out of
+  memory) — that was a no-op stub. It now captures the message and `main.c`
+  shows it ("Could not load this ROM" + reason, e.g. "Mapper 71 not yet
+  implemented", press A to go back). Turns every failed ROM into a self-report.
+
+- **Battery (SRAM) saves.** `rom_savesram`/`rom_loadsram` were `#if 0` stubs
+  using desktop `fopen`. Reimplemented over `pd->file` as `osd_load_sram`/
+  `osd_save_sram`, writing `<romname>.sav` to `/Shared/Emulation/nes/saves/`.
+  Saved on three paths, because returning to the picker never frees the ROM (so
+  `rom_free`'s existing save call never fires): return-to-picker, `kEventPause`
+  (system menu opens), and `kEventTerminate`. Only `ROM_FLAG_BATTERY` carts get
+  a `.sav`. Save states are intentionally **not** supported.
+
+- **Crank Start/Select is now motion-based, not position-based.** *Discovery:* a
+  position-based mapping (crank angle inside a zone = button held) can never
+  avoid a phantom press, because the angle the crank rests at when undocked is
+  unpredictable — whatever zone it lands in fires immediately. Deadzone +
+  hysteresis did **not** fix it (the resting angle simply sat inside the Start
+  zone, which spanned half the circle). The fix keys off `getCrankChange`
+  (motion): turning the crank one way = Start, the other = Select, held while
+  turning and released ~4 frames after stopping (a flick reads as a tap). An
+  idle or newly-undocked crank sends nothing at any angle. Safe because holding
+  Start/Select is essentially never required anywhere in the NES library.
+
 ## Target & result
 
 - **Goal:** 50 fps (PAL NES speed). Starting point: ~30 fps, unshippable.

@@ -9,6 +9,14 @@ Playdate `FamiCrank.pdx`, boots into the ROM picker, launches games cleanly, sup
 runtime frameskip/FPS settings, and has a promoted fast default build. Remaining work is
 optional polish or compatibility work, not required for the main roadmap.
 
+Status as of 2026-07-09 (0.3): post-launch fixes shipped after user reports — ROM picker
+cap raised 256→1024, on-screen load-failure message (shows the core's reason, e.g. an
+unsupported mapper), battery (SRAM) saves to `/Shared/Emulation/nes/saves/` written on
+return-to-picker / system-menu / terminate (save states not supported), and motion-based
+crank Start/Select. The crank change is the notable one: position-based mapping fired a
+phantom Start from whatever angle the crank rested at when undocked, so it was replaced
+with `getCrankChange` motion detection. See `FINDINGS.md` for details.
+
 ## Target hardware
 
 | | |
