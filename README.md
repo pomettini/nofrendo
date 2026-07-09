@@ -22,17 +22,17 @@ Mostly full speed, with a few slowdowns and minor glitches on demanding games.
 
 ## Saves
 
-FamiCrank does not support saving (yet).
+Your progress is saved automatically when you switch games or quit the app. Save files are stored in `Games/Shared/Emulation/nes/saves/` on your Playdate.
 
 ## Controls
 
-| Playdate            | NES    |
-| ------------------- | ------ |
-| D-pad               | D-pad  |
-| A                   | A      |
-| B                   | B      |
-| Crank pointing up   | Select |
-| Crank pointing down | Start  |
+| Playdate       | NES    |
+| -------------- | ------ |
+| D-pad          | D-pad  |
+| A              | A      |
+| B              | B      |
+| Crank forward  | Start  |
+| Crank backward | Select |
 
 ## Options (found in Playdate system menu)
 
