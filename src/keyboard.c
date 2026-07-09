@@ -34,20 +34,49 @@ static void set_button_state(int evt, bool *down, bool should_be_down) {
     *down = should_be_down;
 }
 
+/* Crank -> Select/Start by MOTION, not resting position. Any position-based
+   mapping fires whatever button the crank's resting angle lands in, and that
+   resting angle is unpredictable (it's wherever the crank hangs when you
+   undock it) -- which caused Start to trigger the instant the crank was pulled
+   out. Keying off motion instead means an idle or newly-undocked crank sends
+   nothing at all, whatever angle it rests at.
+
+   Turning the crank one way presses Start, the other way Select. The button is
+   held while you keep turning and released a few frames after you stop, so a
+   quick flick reads as a clean tap (all Start/Select uses on the NES are taps). */
+#define CRANK_MOVE_DEG        2.0f /* per-frame motion that counts as cranking */
+#define CRANK_RELEASE_FRAMES  4    /* frames of stillness before releasing     */
+
+static int crank_dir = 0;         /* -1 = Select, +1 = Start, 0 = none */
+static int crank_still_frames = 0;
+
 static void compute_crank_buttons(bool *select_down, bool *start_down) {
     *select_down = false;
     *start_down  = false;
 
-    if (!pd->system->isCrankDocked()) {
-        float angle = pd->system->getCrankAngle();
-        while (angle < 0.0f)
-            angle += 360.0f;
-        while (angle >= 360.0f)
-            angle -= 360.0f;
-
-        *select_down = angle < 60.0f;
-        *start_down  = angle > 180.0f;
+    if (pd->system->isCrankDocked()) {
+        crank_dir = 0;
+        crank_still_frames = CRANK_RELEASE_FRAMES;
+        return;
     }
+
+    float change = pd->system->getCrankChange();
+    if (change > CRANK_MOVE_DEG) {
+        crank_dir = +1; /* forward -> Start */
+        crank_still_frames = 0;
+    } else if (change < -CRANK_MOVE_DEG) {
+        crank_dir = -1; /* backward -> Select */
+        crank_still_frames = 0;
+    } else if (crank_still_frames < CRANK_RELEASE_FRAMES) {
+        crank_still_frames++;
+    } else {
+        crank_dir = 0; /* stopped long enough -> release */
+    }
+
+    if (crank_dir > 0)
+        *start_down = true;
+    else if (crank_dir < 0)
+        *select_down = true;
 }
 
 static void update_crank_buttons(void) {
@@ -59,11 +88,12 @@ static void update_crank_buttons(void) {
 }
 
 void osd_input_init(void) {
-    /* Baseline the crank to its current resting position so a ROM that loads
-       while the crank sits in the Start/Select zone doesn't fire a phantom
-       press. Start/Select only register when the crank is actively moved into
-       the zone afterwards. */
-    compute_crank_buttons(&crank_select_down, &crank_start_down);
+    /* Start neutral; motion-based input never fires from a resting crank, so
+       there is no phantom press to baseline away anymore. */
+    crank_dir = 0;
+    crank_still_frames = CRANK_RELEASE_FRAMES;
+    crank_select_down = false;
+    crank_start_down = false;
 }
 
 void osd_getinput(void) {
