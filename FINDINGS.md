@@ -42,6 +42,43 @@ emulation core or its performance; these are compatibility, UX, and feature work
   idle or newly-undocked crank sends nothing at any angle. Safe because holding
   Start/Select is essentially never required anywhere in the NES library.
 
+## Hardware revisions: two different Playdate CPUs (measured 2026-07)
+
+All the optimization in this document was done on the **original Playdate, an
+STM32F746** (Cortex-M7, 16KB I-cache + 16KB D-cache). Panic later shipped a
+newer revision using an **STM32H7** (its boot log reports `target=h7d1`,
+`pcbver=0x13`) — a faster clock with larger caches. The *same shipped 0.3 binary*
+behaves very differently on the two:
+
+| Mario 1-1 idle (diag-fast build) | F746 (original) | H7 (Rev B) |
+|---|---:|---:|
+| `cpu_only` | ~20 ms | **~4 ms** |
+| `ppu_full` | ~28 ms | **~8 ms** |
+| `fps` | ~37 | **50** (locked to PAL target) |
+| frame budget used | over budget | **~40%** |
+
+`cpu_only` fell ~5x and `ppu_full` ~3.5x. This is a clean confirmation of the
+D-cache theory: the wall was the 32KB PRG ROM missing a 16KB D-cache, and the
+H7's larger cache plus higher clock erases it. On the H7 the emulator hits the
+50fps PAL target with ~60% of every frame sitting idle (the F746 couldn't reach
+50fps even idle).
+
+**Implications:**
+- **No Rev B-specific optimization is worth doing** — there is nothing to fix; the
+  H7 runs the current binary better than the F746 ever could. The value flipped
+  from "can't help" to "doesn't need help."
+- The **F746 remains the constraint**, and it is already taken as far as it
+  sensibly goes (only a dynarec would move it further, which is not worth it).
+- The one latent option is **60fps NTSC on the H7** (it has the headroom), but
+  `NES_REFRESH_RATE` is a compile-time 50(PAL)/60(NTSC) switch that also drives
+  audio/timing, and itch ships one binary to a userbase that still includes many
+  F746 units. So 60fps would need either a separate H7 build or a refactor to a
+  runtime-selectable rate with hardware detection. Filed as "interesting, not
+  worth it now."
+
+Note: the "Hardware reality" section below predates this and labels the F746 as
+"rev B" — that label was loose; treat that section as describing the **F746**.
+
 ## Target & result
 
 - **Goal:** 50 fps (PAL NES speed). Starting point: ~30 fps, unshippable.

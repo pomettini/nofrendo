@@ -5,6 +5,30 @@ Current package name: `FamiCrank.pdx`. Older rows may mention historical diagnos
 names from before the app rename.
 Target: **50 fps** (PAL NES speed). Current best full-level Mario row:
 **~49-50 fps** in light windows, **~37-45 fps** in the remaining slow windows.
+(All F746 figures below. See the Rev B / STM32H7 entry immediately after this line.)
+
+---
+
+## Rev B is a different CPU (STM32H7) — measured 2026-07-09
+
+The whole log below is the **original Playdate, STM32F746** (16KB I-cache + 16KB D-cache).
+A newer Playdate revision uses an **STM32H7** (boot log `target=h7d1`, `pcbver=0x13`),
+higher clock + bigger caches. Same shipped 0.3 diag-fast build, Mario 1-1 idle:
+
+| metric | F746 (original) | H7 (Rev B) |
+|---|---:|---:|
+| `cpu_only` | ~20 ms | ~4 ms (3–5) |
+| `ppu_full` | ~28 ms | ~8 ms (6–9) |
+| `fps` | ~37 | 50 (locked to PAL target) |
+| `avg` | ~26 ms | ~20 ms |
+
+Raw H7 sample: `fps=50 avg=19-20ms cpu_only=3-5ms ppu_full=6-9ms` steady across 2400+ frames.
+
+**Interpretation:** `cpu_only` down ~5x confirms the bottleneck was D-cache misses on the
+32KB PRG ROM against a 16KB D-cache — the H7's bigger cache erases it, and it hits the 50fps
+PAL target with ~60% of each frame idle. **No Rev-B optimization is warranted** (nothing to
+fix). Latent-only option: 60fps NTSC on H7, blocked by compile-time `NES_REFRESH_RATE`
+(50 PAL) + one-binary-for-all-devices. Not pursued. Full write-up: FINDINGS.md.
 
 ---
 

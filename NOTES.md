@@ -17,6 +17,42 @@ crank Start/Select. The crank change is the notable one: position-based mapping 
 phantom Start from whatever angle the crank rested at when undocked, so it was replaced
 with `getCrankChange` motion detection. See `FINDINGS.md` for details.
 
+## Roadmap (post-0.3)
+
+Next steps in rough priority. Theme: small, low-risk, community-driven updates, not big
+rewrites. The emulator is functionally complete and stable.
+
+1. **Compatibility, driven by the load-error reports.** The error screen now reports the
+   exact unsupported mapper number, so let real usage decide what to add. Mapper 113
+   (simple discrete multicart mapper) is the easy first pick; implement from the NESdev
+   wiki docs, NOT from FCEUmm/Mesen source (GPLv2 vs this project's GPLv3). Mapper 163
+   (Nanjing) is a much bigger job (scanline CHR split needs a PPU hook, large ROMs fight
+   the D-cache ceiling) — defer unless demand is strong.
+
+2. **Harden saves.** Battery saves currently flush on return-to-picker / system menu
+   (`kEventPause`) / terminate. Add a periodic autosave (flush dirty SRAM every N seconds)
+   so a dead battery or crash mid-session can't lose progress.
+
+3. **Optional 0.4 headline feature (at most one):** a screen fill/scaling option (NES is
+   256px wide on a 400px screen), or ROM-picker quality-of-life (subfolders, favourites,
+   remember last position).
+
+Explicitly NOT planned:
+- No performance rewrite. The ceiling is the D-cache vs 32KB PRG-ROM wall; only a dynarec
+  breaks it, which is a months-long, high-risk effort not worth it here.
+- No save states (user decision; see `FINDINGS.md` / memory).
+
+**Rev B hardware — MEASURED 2026-07-09, no action needed.** The newer Playdate revision is
+a different CPU: an **STM32H7** (boot log `target=h7d1`, `pcbver=0x13`), not the STM32F746
+the optimization work targeted. On the same shipped 0.3 diag-fast build, Mario 1-1 idle
+went from F746 `cpu_only≈20ms / ppu_full≈28ms / fps≈37` to H7 `cpu_only≈4ms / ppu_full≈8ms /
+fps=50 (locked to the PAL target)` — ~5x less CPU time, ~60% of each frame idle. The
+D-cache/32KB-ROM bottleneck simply does not exist on the H7. **Conclusion: no Rev-B-specific
+optimization is worth doing (nothing to fix); the current binary already runs better than
+the F746 ever could.** The only latent option is 60fps NTSC on the H7, blocked by the
+compile-time `NES_REFRESH_RATE` (50 PAL) switch + one-binary-for-all-devices constraint; not
+worth it for now. See FINDINGS.md "Hardware revisions" for the full table.
+
 ## Target hardware
 
 | | |
