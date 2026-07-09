@@ -338,6 +338,50 @@ char *osd_newextension(char *string, char *ext) {
     return string;
 }
 
+/* Battery SRAM lives in a shared saves folder as <romname>.sav, kept separate
+   from the ROMs. Reads/writes go through the Playdate file API, the same way
+   settings and ROM data do. */
+#define SRAM_SAVE_DIR "/Shared/Emulation/nes/saves/"
+
+/* Build the .sav path: SRAM_SAVE_DIR + the ROM's basename with a .sav suffix. */
+static void osd_sram_path(const char *rom_path, char *out, size_t outsz) {
+    const char *base = strrchr(rom_path, '/');
+    base = base ? base + 1 : rom_path;
+    snprintf(out, outsz, "%s%s", SRAM_SAVE_DIR, base);
+    osd_newextension(out, ".sav");
+}
+
+int osd_load_sram(const char *rom_path, unsigned char *sram, int len) {
+    char fn[PATH_MAX + 1];
+    osd_sram_path(rom_path, fn, sizeof(fn));
+
+    SDFile *f = pd->file->open(fn, kFileRead | kFileReadData);
+    if (!f)
+        return -1; /* no save yet — normal on first play */
+
+    int n = pd->file->read(f, sram, (unsigned int)len);
+    pd->file->close(f);
+    return (n == len) ? 0 : -1;
+}
+
+int osd_save_sram(const char *rom_path, const unsigned char *sram, int len) {
+    char fn[PATH_MAX + 1];
+    osd_sram_path(rom_path, fn, sizeof(fn));
+
+    pd->file->mkdir(SRAM_SAVE_DIR); /* ensure the saves folder exists */
+
+    SDFile *f = pd->file->open(fn, kFileWrite);
+    if (!f) {
+        pd->system->logToConsole("[sram] cannot write %s: %s", fn,
+                                 pd->file->geterr());
+        return -1;
+    }
+
+    int n = pd->file->write(f, (void *)sram, (unsigned int)len);
+    pd->file->close(f);
+    return (n == len) ? 0 : -1;
+}
+
 int osd_makesnapname(char *filename, int len) {
     return -1;
 }

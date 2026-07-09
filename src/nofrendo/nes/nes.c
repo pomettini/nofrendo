@@ -94,6 +94,14 @@ nes_t *nes_getcontextptr(void)
    return &nes;
 }
 
+/* Flush the current cart's battery RAM to disk. Safe to call any time; it is a
+   no-op if no cart is loaded or the cart has no battery. */
+void nes_savesram(void)
+{
+   if (nes.rominfo)
+      rom_savesram(nes.rominfo);
+}
+
 void nes_getcontext(nes_t *machine)
 {
 #if AUDIO

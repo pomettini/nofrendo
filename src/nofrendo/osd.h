@@ -89,6 +89,10 @@ extern int osd_installtimer(int frequency, void *func, int funcsize,
 extern void osd_fullname(char *fullname, const char *shortname);
 extern char *osd_newextension(char *string, char *ext);
 
+/* battery-backed SRAM persistence (.sav next to the ROM); return 0 on success */
+extern int osd_load_sram(const char *rom_path, unsigned char *sram, int len);
+extern int osd_save_sram(const char *rom_path, const unsigned char *sram, int len);
+
 /* input */
 extern void osd_getinput(void);
 extern void osd_getmouse(int *x, int *y, int *button);

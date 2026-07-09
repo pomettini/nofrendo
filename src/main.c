@@ -8,6 +8,7 @@
 PlaydateAPI *pd;
 
 extern void nes6502_itcm_init(void *(*alloc_fn)(void *, size_t));
+extern void nes_savesram(void); /* flush battery RAM to its .sav in the saves folder */
 
 #define ROM_PICKER_FOLDER "/Shared/Emulation/nes/games/"
 
@@ -157,6 +158,7 @@ int app_return_to_picker_if_requested(void) {
     return 0;
 
   return_to_picker_requested = 0;
+  nes_savesram(); /* persist battery RAM before tearing the game down */
   main_quit();
   emulator_started = 0;
   selected_rom_path[0] = '\0';
@@ -280,6 +282,13 @@ int eventHandler(PlaydateAPI *playdate, PDSystemEvent event, uint32_t arg) {
     run_tcmhot_probe();
 #endif
     start_rom_picker();
+  } else if (event == kEventPause) {
+    /* System menu opened — the realistic "I'm putting it down" moment. */
+    if (emulator_started)
+      nes_savesram();
+  } else if (event == kEventTerminate) {
+    if (emulator_started)
+      nes_savesram();
   }
   return 0;
 }

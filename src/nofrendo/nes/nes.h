@@ -98,6 +98,7 @@ extern int nes_isourfile(const char *filename);
 
 /* temp hack */
 extern nes_t *nes_getcontextptr(void);
+extern void nes_savesram(void);
 
 /* Function prototypes */
 extern void nes_getcontext(nes_t *machine);

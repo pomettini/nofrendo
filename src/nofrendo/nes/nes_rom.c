@@ -84,54 +84,32 @@ typedef struct inesheader_s
 #define  SRAM_BANK_LENGTH  0x0400
 #define  VRAM_BANK_LENGTH  0x2000
 
-/* Save battery-backed RAM */
-static void rom_savesram(rominfo_t *rominfo)
+/* Save battery-backed RAM to the .sav next to the ROM. Public so the host can
+   flush saves at pause/terminate/return-to-picker (rom_free is not reached on
+   those paths). No-op for carts without a battery. */
+void rom_savesram(rominfo_t *rominfo)
 {
-#if 0
-   FILE *fp;
-   char fn[PATH_MAX + 1];
-
    ASSERT(rominfo);
 
    if (rominfo->flags & ROM_FLAG_BATTERY)
    {
-      strncpy(fn, rominfo->filename, PATH_MAX);
-      osd_newextension(fn, ".sav");
-
-      fp = fopen(fn, "wb");
-      if (NULL != fp)
-      {
-         fwrite(rominfo->sram, SRAM_BANK_LENGTH, rominfo->sram_banks, fp);
-         fclose(fp);
-         log_printf("Wrote battery RAM to %s.\n", fn);
-      }
+      int len = SRAM_BANK_LENGTH * rominfo->sram_banks;
+      if (0 == osd_save_sram(rominfo->filename, rominfo->sram, len))
+         log_printf("Wrote battery RAM for %s\n", rominfo->filename);
    }
-#endif
 }
 
-/* Load battery-backed RAM from disk */
+/* Load battery-backed RAM from the .sav next to the ROM, if one exists. */
 static void rom_loadsram(rominfo_t *rominfo)
 {
-#if 0
-   FILE *fp;
-   char fn[PATH_MAX + 1];
-
    ASSERT(rominfo);
 
    if (rominfo->flags & ROM_FLAG_BATTERY)
    {
-      strncpy(fn, rominfo->filename, PATH_MAX);
-      osd_newextension(fn, ".sav");
-
-      fp = fopen(fn, "rb");
-      if (NULL != fp)
-      {
-         fread(rominfo->sram, SRAM_BANK_LENGTH, rominfo->sram_banks, fp);
-         fclose(fp);
-         log_printf("Read battery RAM from %s.\n", fn);
-      }
+      int len = SRAM_BANK_LENGTH * rominfo->sram_banks;
+      if (0 == osd_load_sram(rominfo->filename, rominfo->sram, len))
+         log_printf("Read battery RAM for %s\n", rominfo->filename);
    }
-#endif
 }
 
 /* Allocate space for SRAM */
