@@ -1,3 +1,6 @@
 [submodule "third_party/pd-rom-picker"]
 	path = third_party/pd-rom-picker
 	url = https://github.com/pomettini/pd-rom-picker.git
+[submodule "third_party/pd-playbench"]
+	path = third_party/pd-playbench
+	url = https://github.com/pomettini/pd-playbench.git

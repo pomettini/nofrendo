@@ -78,6 +78,16 @@ void osd_getsoundinfo(sndinfo_t *info) {
 void sound_fill_buffer(void) {
     if (!apu_fill) return;
 
+#if defined(PD_PLAYBENCH_ENABLED) || defined(PD_PLAYBENCH_RECORD)
+    /* Deterministic audio: advance the APU by exactly one PAL frame's worth of
+       samples (SAMPLE_RATE / 50), independent of wall-clock time and ring space.
+       The normal path fills based on elapsed real time, which advances the APU
+       length counters / $4015 by a different amount each run — desyncing a replay
+       from its recording (and Rev A from Rev B). Ring over/underrun here only
+       glitches audio, which does not matter for a benchmark. */
+    (void)last_fill_ms;
+    int samples = SAMPLE_RATE / 50;
+#else
     uint32_t now_ms  = pd->system->getCurrentTimeMilliseconds();
     uint32_t elapsed = now_ms - last_fill_ms;
     last_fill_ms     = now_ms;
@@ -87,6 +97,7 @@ void sound_fill_buffer(void) {
     if (samples > space)    samples = space;
     if (samples > MAX_FILL) samples = MAX_FILL;
     if (samples <= 0) return;
+#endif
 
 #ifdef AUDIO_DIRECT_RING
     unsigned int write = ring_write;

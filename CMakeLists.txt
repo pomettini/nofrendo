@@ -65,6 +65,13 @@ if (TOOLCHAIN STREQUAL "armgcc")
     list(APPEND PLATFORM_SOURCES src/syscalls.c)
 endif()
 
+# pd-playbench: scripted-input benchmark harness, dev-only (never in release)
+option(PD_PLAYBENCH "Build the pd-playbench scripted-input benchmark harness (dev only)" OFF)
+option(PD_PLAYBENCH_RECORD "Build the input recorder: dump a pd-playbench script from live play (dev only)" OFF)
+if (PD_PLAYBENCH)
+    list(APPEND PLATFORM_SOURCES third_party/pd-playbench/src/pd_playbench.c)
+endif()
+
 option(DIAG        "Enable performance diagnostics (logToConsole every 60 frames)" OFF)
 option(DIAG_DRAW_FPS "Draw Playdate's on-screen FPS HUD in diagnostic builds" OFF)
 option(DIAG_FPS_ONLY "Log only FPS windows without per-frame render timing" OFF)
@@ -128,6 +135,7 @@ set(GAME_INCLUDES
     src/nofrendo/libsnss
     src/nofrendo/cpu
     third_party/pd-rom-picker/src
+    third_party/pd-playbench/src
 )
 if (AUDIO)
     list(APPEND GAME_INCLUDES src/nofrendo/sndhrdw)
@@ -142,6 +150,9 @@ set(GAME_DEFINES
     $<$<BOOL:${DIAG}>:DIAG=1>
     $<$<BOOL:${DIAG_DRAW_FPS}>:DIAG_DRAW_FPS=1>
     $<$<BOOL:${DIAG_FPS_ONLY}>:DIAG_FPS_ONLY=1>
+    $<$<BOOL:${PD_PLAYBENCH}>:PD_PLAYBENCH_ENABLED=1>
+    $<$<BOOL:${PD_PLAYBENCH}>:PD_PLAYBENCH_MAX_COMMANDS=1024>
+    $<$<BOOL:${PD_PLAYBENCH_RECORD}>:PD_PLAYBENCH_RECORD=1>
     $<$<BOOL:${DIAG}>:BUILD_TIMESTAMP="${BUILD_TIMESTAMP}">
     $<$<NOT:$<BOOL:${PPU_BG}>>:DISABLE_PPU_BG=1>
     $<$<NOT:$<BOOL:${PPU_SPRITES}>>:DISABLE_PPU_SPRITES=1>

@@ -10,6 +10,10 @@
 #include <nofrendo.h>
 #include <nes.h>
 
+#ifdef PD_PLAYBENCH_ENABLED
+#include "pd_playbench.h"
+#endif
+
 extern PlaydateAPI *pd;
 
 static char configfilename[] = "nofrendo.cfg";
@@ -217,6 +221,33 @@ static int playdate_update(void *ud) {
     if (app_return_to_picker_if_requested())
         return 1;
 
+#ifdef PD_PLAYBENCH_ENABLED
+    /* Benchmark over: the Playdate C SDK has no quit-to-launcher, so we stop
+       emulating and show a completion screen. The report is already in the
+       console / benchmarks/latest.txt; exit via the system menu. */
+    if (pd_playbench_is_finished()) {
+        static int bench_end_shown = 0;
+        if (!bench_end_shown) {
+            bench_end_shown = 1;
+            const char *ferr = NULL;
+            LCDFont *f = pd->graphics->loadFont(
+                "/System/Fonts/Asheville-Sans-14-Bold.pft", &ferr);
+            pd->graphics->clear(kColorWhite);
+            if (f) {
+                pd->graphics->setFont(f);
+                const char *m = "Benchmark complete";
+                int w = pd->graphics->getTextWidth(f, m, (int)strlen(m),
+                                                   kUTF8Encoding, 0);
+                pd->graphics->drawText(m, strlen(m), kUTF8Encoding, (400 - w) / 2,
+                                       112);
+            }
+            pd->system->logToConsole(
+                "[bench] complete -- report above; exit via the menu");
+        }
+        return 1;
+    }
+#endif
+
 #ifdef DTCM_POOL_SCAN
     {
         static int scan_frames = 0;
@@ -229,6 +260,13 @@ static int playdate_update(void *ud) {
 
     int auto_mode = (frame_skip == FRAME_SKIP_AUTO);
     int draw;
+#if defined(PD_PLAYBENCH_ENABLED) || defined(PD_PLAYBENCH_RECORD)
+    /* Emulate every frame fully so record/replay are frame-deterministic. Frameskip
+       takes the approximate sprite-0-hit path (nes_ppu.c) on skipped frames, and
+       Auto skip is real-time dependent, which desyncs a replay from its recording. */
+    draw = 1;
+    (void)auto_mode;
+#else
     if (skip_counter <= 0) {
         draw = 1;
         skip_counter = auto_mode
@@ -238,10 +276,15 @@ static int playdate_update(void *ud) {
         draw = 0;
         skip_counter--;
     }
+#endif
 
     uint32_t work_start = 0;
     if (auto_mode)
         work_start = pd->system->getCurrentTimeMilliseconds();
+
+#ifdef PD_PLAYBENCH_ENABLED
+    uint32_t pb_work_start = pd->system->getCurrentTimeMilliseconds();
+#endif
 
     diag_frame_begin();
     diag_render_begin(draw);
@@ -250,6 +293,14 @@ static int playdate_update(void *ud) {
     osd_getinput();
     sound_fill_buffer();
     diag_frame_end();
+
+#ifdef PD_PLAYBENCH_ENABLED
+    /* Report this frame's emulation work time to the benchmark (no-op until the
+       script's measurement window is running). draw==0 means a skipped frame. */
+    pd_playbench_report_frame(
+        (float)(pd->system->getCurrentTimeMilliseconds() - pb_work_start),
+        draw ? 0 : 1);
+#endif
 
     if (auto_mode) {
         uint32_t work = pd->system->getCurrentTimeMilliseconds() - work_start;
