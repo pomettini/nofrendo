@@ -9,6 +9,49 @@ Target: **50 fps** (PAL NES speed). Current best full-level Mario row:
 
 ---
 
+## Deterministic benchmark baseline + dynarec feasibility gate — 2026-07-14
+
+Current unmodified `make bench` baseline, measured on the developer's Rev B (STM32H7):
+
+| metric | result |
+|---|---:|
+| `total_frames` / `measured_frames` | 2879 / 2879 |
+| `elapsed_ms` | 45411.00 |
+| `avg_frame_ms` | **15.77** |
+| `best_frame_ms` | 2.00 |
+| `worst_frame_ms` | 20.00 |
+| `slow_frames` / `skipped_frames` | 0 / 0 |
+| `estimated_fps` | 63.40 |
+
+Correctness guard: the deterministic `nes_smb1_world_1_1` replay completed all 2879
+frames with no skipped or slow frames.
+
+**Dynarec feasibility gate: REJECTED — hard fault.** The opt-in probe wrote two Thumb
+instructions into a 32-byte-aligned writable-SRAM buffer at `0x9001D9A0`, then attempted
+the mandatory D-cache clean before calling the SDK `clearICache()` and jumping to it.
+Device output stopped after:
+
+```text
+[dynarec-ram] begin addr=9001d9a0 bytes=32 region=writable-sram
+[dynarec-ram] pass=1 code-written
+```
+
+The crash record identifies the cache-maintenance write exactly:
+
+```text
+pc=9000d5c8 r2=e000ef68 cfsr=00000400 hfsr=40000000
+```
+
+`0xE000EF68` is Cortex-M7 `DCCMVAC`; `CFSR=0x400` is an imprecise bus fault from that
+write. The Playdate sandbox therefore blocks the required D-cache range clean. The probe
+never reached the SDK I-cache call or generated-code jump, but cached writable SRAM cannot
+be used safely as an updatable code cache without the rejected coherency operation. Under
+the mandatory hard-fault gate, the dynarec is **not viable**: stop here and do not build a
+translator. The failed probe implementation and build target were reverted; this result
+remains logged so the privileged cache-maintenance experiment is not repeated.
+
+---
+
 ## Rev B is a different CPU (STM32H7) — measured 2026-07-09
 
 The whole log below is the **original Playdate, STM32F746** (16KB I-cache + 16KB D-cache).
