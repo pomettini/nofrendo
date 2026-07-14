@@ -329,206 +329,20 @@ static const char *bench_find_rom(void) {
 
 #ifdef PD_PLAYBENCH_ENABLED
 #include "pd_playbench.h"
+#endif
 
+#if defined(PD_PLAYBENCH_ENABLED) && !defined(PD_PLAYBENCH_RECORD)
 /* Recorded script written by the record build; must match REC_SCRIPT_PATH in
    keyboard.c. Loaded in preference to the built-in script when present. */
 #define REC_SCRIPT_PATH "/Shared/Emulation/nes/rec_script.txt"
 
-/* Super Mario Bros World 1-1: a real playthrough captured with the record build
-   (make bench-record) and replayed deterministically. UP = Start. Regenerate by
-   re-recording and pasting the REC lines (prefix stripped) here. */
+/* Minimal fallback, used only if neither the /Shared override nor the bundled
+   script is present: boot the game and idle briefly, then stop. The real
+   benchmark is the committed, bundled nes_smb1_world_1_1.txt recording. */
 static const char *bench_build_script(void) {
-  return "wait 201\n"
-         "hold UP 10\n"
-         "wait 149\n"
-         "hold RIGHT 3\n"
-         "hold RIGHT+B 29\n"
-         "hold B 2\n"
-         "hold RIGHT+B 4\n"
-         "hold B 22\n"
-         "wait 12\n"
-         "hold RIGHT 12\n"
-         "hold RIGHT+B 39\n"
-         "hold RIGHT 9\n"
-         "hold RIGHT+A 6\n"
-         "hold RIGHT 5\n"
-         "wait 23\n"
-         "hold RIGHT 22\n"
-         "hold A 14\n"
-         "wait 30\n"
-         "hold RIGHT 11\n"
-         "wait 24\n"
-         "hold RIGHT 37\n"
-         "wait 31\n"
-         "hold LEFT 5\n"
-         "wait 39\n"
-         "hold RIGHT 7\n"
-         "wait 3\n"
-         "hold RIGHT 27\n"
-         "hold RIGHT+A 18\n"
-         "hold RIGHT 28\n"
-         "hold RIGHT+B 8\n"
-         "hold RIGHT 20\n"
-         "hold RIGHT+A 12\n"
-         "hold RIGHT 30\n"
-         "hold RIGHT+A 17\n"
-         "hold RIGHT 48\n"
-         "hold RIGHT+A 31\n"
-         "hold RIGHT 19\n"
-         "hold RIGHT+A 17\n"
-         "hold RIGHT 43\n"
-         "hold RIGHT+A 29\n"
-         "hold RIGHT 21\n"
-         "hold RIGHT+B 7\n"
-         "hold RIGHT 17\n"
-         "hold RIGHT+B 8\n"
-         "hold RIGHT 21\n"
-         "hold RIGHT+A 44\n"
-         "hold RIGHT 19\n"
-         "hold RIGHT+B 13\n"
-         "hold RIGHT 7\n"
-         "wait 3\n"
-         "hold A 5\n"
-         "wait 54\n"
-         "hold LEFT 8\n"
-         "hold LEFT+A 33\n"
-         "hold A 1\n"
-         "wait 21\n"
-         "hold RIGHT 7\n"
-         "wait 16\n"
-         "hold RIGHT 92\n"
-         "hold RIGHT+A 35\n"
-         "hold RIGHT 16\n"
-         "hold RIGHT+B 4\n"
-         "hold RIGHT 4\n"
-         "hold RIGHT+B 3\n"
-         "hold RIGHT 4\n"
-         "hold RIGHT+B 3\n"
-         "hold RIGHT 2\n"
-         "wait 2\n"
-         "hold B 2\n"
-         "hold RIGHT 5\n"
-         "hold RIGHT+B 3\n"
-         "wait 4\n"
-         "hold B 3\n"
-         "hold RIGHT 5\n"
-         "hold RIGHT+B 3\n"
-         "hold RIGHT 4\n"
-         "hold RIGHT+B 4\n"
-         "hold RIGHT 5\n"
-         "hold RIGHT+B 3\n"
-         "hold RIGHT 4\n"
-         "hold RIGHT+B 4\n"
-         "hold RIGHT 4\n"
-         "hold RIGHT+B 1\n"
-         "hold B 3\n"
-         "wait 3\n"
-         "hold RIGHT 1\n"
-         "hold RIGHT+B 5\n"
-         "hold RIGHT 4\n"
-         "hold RIGHT+B 4\n"
-         "hold RIGHT 4\n"
-         "hold RIGHT+B 4\n"
-         "hold RIGHT 5\n"
-         "hold RIGHT+B 3\n"
-         "hold RIGHT 5\n"
-         "hold RIGHT+B 4\n"
-         "hold RIGHT 4\n"
-         "hold RIGHT+B 4\n"
-         "hold RIGHT 4\n"
-         "hold RIGHT+B 5\n"
-         "hold RIGHT 4\n"
-         "hold RIGHT+B 4\n"
-         "hold RIGHT 5\n"
-         "hold RIGHT+B 4\n"
-         "hold RIGHT 5\n"
-         "hold RIGHT+B 4\n"
-         "hold RIGHT 4\n"
-         "hold RIGHT+B 4\n"
-         "hold RIGHT 4\n"
-         "hold RIGHT+B 4\n"
-         "hold RIGHT 4\n"
-         "hold RIGHT+B 1\n"
-         "hold B 3\n"
-         "wait 4\n"
-         "hold B 5\n"
-         "wait 4\n"
-         "hold B 5\n"
-         "wait 3\n"
-         "hold RIGHT 1\n"
-         "hold RIGHT+B 4\n"
-         "hold RIGHT 4\n"
-         "hold RIGHT+B 5\n"
-         "hold RIGHT 4\n"
-         "hold RIGHT+B 5\n"
-         "hold RIGHT 5\n"
-         "hold RIGHT+B 3\n"
-         "hold RIGHT 6\n"
-         "hold RIGHT+B 2\n"
-         "hold B 1\n"
-         "wait 5\n"
-         "hold RIGHT 9\n"
-         "hold RIGHT+A 28\n"
-         "hold RIGHT 19\n"
-         "hold RIGHT+A 12\n"
-         "hold RIGHT 6\n"
-         "wait 22\n"
-         "hold A 3\n"
-         "hold RIGHT+A 18\n"
-         "hold RIGHT 6\n"
-         "hold RIGHT+A 28\n"
-         "hold RIGHT 10\n"
-         "hold RIGHT+B 13\n"
-         "hold RIGHT 34\n"
-         "hold RIGHT+A 10\n"
-         "hold RIGHT 8\n"
-         "wait 15\n"
-         "hold A 2\n"
-         "hold RIGHT+A 21\n"
-         "hold RIGHT 19\n"
-         "hold RIGHT+A 19\n"
-         "hold RIGHT 32\n"
-         "hold RIGHT+B 9\n"
-         "hold RIGHT 17\n"
-         "hold RIGHT+A 11\n"
-         "hold RIGHT 40\n"
-         "hold RIGHT+B 3\n"
-         "hold RIGHT 4\n"
-         "hold RIGHT+B 3\n"
-         "hold RIGHT 3\n"
-         "wait 2\n"
-         "hold B 3\n"
-         "wait 4\n"
-         "hold B 3\n"
-         "wait 4\n"
-         "hold B 4\n"
-         "wait 4\n"
-         "hold B 1\n"
-         "hold RIGHT+B 3\n"
-         "hold RIGHT 5\n"
-         "hold RIGHT+B 3\n"
-         "hold RIGHT 5\n"
-         "hold RIGHT+B 3\n"
-         "hold RIGHT 6\n"
-         "hold RIGHT+B 2\n"
-         "wait 11\n"
-         "hold A 4\n"
-         "hold RIGHT+A 9\n"
-         "hold RIGHT 24\n"
-         "hold RIGHT+A 20\n"
-         "hold RIGHT 20\n"
-         "hold RIGHT+A 25\n"
-         "hold RIGHT 1\n"
-         "wait 19\n"
-         "hold A 5\n"
-         "hold RIGHT+A 3\n"
-         "hold A 1\n"
-         "wait 22\n"
-         "hold RIGHT 1\n"
-         "hold RIGHT+B 23\n"
-         "hold RIGHT+A+B 36\n"
-         "hold RIGHT+B 38\n"
-         "wait 180\n"
+  return "wait 200\n"   /* title screen */
+         "hold UP 10\n" /* press Start   */
+         "wait 600\n"   /* smoke-test idle */
          "stop\n";
 }
 
@@ -563,11 +377,12 @@ static void bench_run(void) {
       .input_mode = PD_PLAYBENCH_INPUT_OVERRIDE,
   };
   pd_playbench_init(pd, &cfg);
-  /* Prefer a recording captured with the record build (make bench-record);
-     fall back to the built-in script if none is present. */
+  /* Load order: a /Shared recording (iterate with make bench-record), then the
+     committed script bundled in the .pdx, then the minimal fallback. */
   if (pd_playbench_load_script_from_file(REC_SCRIPT_PATH)) {
-    pd->system->logToConsole("[bench] loaded recorded script %s",
-                             REC_SCRIPT_PATH);
+    pd->system->logToConsole("[bench] loaded override %s", REC_SCRIPT_PATH);
+  } else if (pd_playbench_load_script_from_file("nes_smb1_world_1_1.txt")) {
+    pd->system->logToConsole("[bench] loaded bundled script");
   } else if (!pd_playbench_load_script_from_string(bench_build_script())) {
     pd->system->logToConsole("[bench] script error: %s",
                              pd_playbench_get_last_error());
@@ -576,7 +391,7 @@ static void bench_run(void) {
   pd_playbench_start();
   pd->system->logToConsole("[bench] script started: %s", cfg.test_name);
 }
-#endif /* PD_PLAYBENCH_ENABLED */
+#endif /* replay only */
 
 #ifdef PD_PLAYBENCH_RECORD
 extern void osd_rec_dump(void); /* implemented in keyboard.c */
@@ -586,9 +401,9 @@ static void rec_dump_menu(void *ud) {
   osd_rec_dump();
 }
 
-/* Auto-load the Mario ROM and let the player play it live; the recorder in
-   keyboard.c captures every frame. "Dump script" in the system menu prints the
-   replayable pd-playbench script. */
+/* Auto-load the Mario ROM and let the player play it live; pd-playbench records
+   the effective buttons each frame (sampled in osd_getinput). "Dump script" in
+   the system menu saves the replayable script. */
 static void rec_run(void) {
   const char *path = bench_find_rom();
   if (!path) {
@@ -606,6 +421,9 @@ static void rec_run(void) {
     pd->system->logToConsole("[rec] ROM failed to load; recorder aborted");
     return;
   }
+
+  pd_playbench_init(pd, NULL); /* sets the file API for record_save */
+  pd_playbench_record_start();
 
   pd->system->removeAllMenuItems();
   clear_menu_handles();

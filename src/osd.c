@@ -221,7 +221,7 @@ static int playdate_update(void *ud) {
     if (app_return_to_picker_if_requested())
         return 1;
 
-#ifdef PD_PLAYBENCH_ENABLED
+#if defined(PD_PLAYBENCH_ENABLED) && !defined(PD_PLAYBENCH_RECORD)
     /* Benchmark over: the Playdate C SDK has no quit-to-launcher, so we stop
        emulating and show a completion screen. The report is already in the
        console / benchmarks/latest.txt; exit via the system menu. */

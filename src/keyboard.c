@@ -102,85 +102,19 @@ void osd_input_init(void) {
 }
 
 #ifdef PD_PLAYBENCH_RECORD
-/* Input recorder: capture the player's per-frame NES inputs during a live
-   playthrough and dump a run-length-encoded pd-playbench script that replays
-   them. Crank Start is recorded as the UP token, matching the replay build's
-   UP->Start bridge (SMB never uses Up in 1-1). */
-#define REC_LEFT  0x01
-#define REC_RIGHT 0x02
-#define REC_UP    0x04
-#define REC_DOWN  0x08
-#define REC_A     0x10
-#define REC_B     0x20
-#define REC_MAX   1024
-/* Kept in /Shared so it survives reinstalls and is visible in data-disk mode;
-   the replay build loads this exact path. Must match REC_SCRIPT_PATH in main.c. */
+/* The recorder itself lives in pd-playbench; this file just samples the
+   effective buttons each frame (see osd_getinput) and saves on request. Crank
+   Start is recorded as the UP token, matching the replay build's UP->Start
+   bridge (SMB never uses Up in 1-1). Kept in /Shared so it survives reinstalls
+   and is visible in data-disk mode; the replay build loads this exact path. */
 #define REC_SCRIPT_PATH "/Shared/Emulation/nes/rec_script.txt"
 
-static struct {
-    unsigned tokens;
-    int frames;
-} rec_runs[REC_MAX];
-static int rec_count;
-static unsigned rec_prev;
-static int rec_frames;
-
-static void rec_flush(void) {
-    if (rec_frames > 0 && rec_count < REC_MAX) {
-        rec_runs[rec_count].tokens = rec_prev;
-        rec_runs[rec_count].frames = rec_frames;
-        rec_count++;
-    }
-    rec_frames = 0;
-}
-
-static void rec_sample(unsigned tokens) {
-    if (tokens == rec_prev) {
-        rec_frames++;
-    } else {
-        rec_flush();
-        rec_prev = tokens;
-        rec_frames = 1;
-    }
-}
-
-/* Write the captured inputs as a pd-playbench script to a file. A file write is
-   atomic and lossless, unlike streaming ~200 lines to the serial console (which
-   overflows and drops lines). The replay build loads this same file. */
 void osd_rec_dump(void) {
-    static char out[32768];
-    int n = 0;
-
-    rec_flush();
-    for (int i = 0; i < rec_count && n < (int)sizeof(out) - 64; i++) {
-        unsigned t = rec_runs[i].tokens;
-        int f = rec_runs[i].frames;
-        if (t == 0) {
-            n += snprintf(out + n, sizeof(out) - n, "wait %d\n", f);
-            continue;
-        }
-        char b[48];
-        int p = 0;
-        if (t & REC_RIGHT) p += snprintf(b + p, sizeof(b) - p, "%sRIGHT", p ? "+" : "");
-        if (t & REC_LEFT)  p += snprintf(b + p, sizeof(b) - p, "%sLEFT", p ? "+" : "");
-        if (t & REC_UP)    p += snprintf(b + p, sizeof(b) - p, "%sUP", p ? "+" : "");
-        if (t & REC_DOWN)  p += snprintf(b + p, sizeof(b) - p, "%sDOWN", p ? "+" : "");
-        if (t & REC_A)     p += snprintf(b + p, sizeof(b) - p, "%sA", p ? "+" : "");
-        if (t & REC_B)     p += snprintf(b + p, sizeof(b) - p, "%sB", p ? "+" : "");
-        n += snprintf(out + n, sizeof(out) - n, "hold %s %d\n", b, f);
-    }
-    n += snprintf(out + n, sizeof(out) - n, "stop\n");
-
-    SDFile *f = pd->file->open(REC_SCRIPT_PATH, kFileWrite);
-    if (!f) {
+    if (pd_playbench_record_save(REC_SCRIPT_PATH))
+        pd->system->logToConsole("[rec] wrote script to %s", REC_SCRIPT_PATH);
+    else
         pd->system->logToConsole("[rec] FAILED to write %s: %s", REC_SCRIPT_PATH,
-                                 pd->file->geterr());
-        return;
-    }
-    pd->file->write(f, out, (unsigned int)n);
-    pd->file->close(f);
-    pd->system->logToConsole("[rec] wrote %d commands (%d bytes) to %s",
-                             rec_count + 1, n, REC_SCRIPT_PATH);
+                                 pd_playbench_get_last_error());
 }
 #endif /* PD_PLAYBENCH_RECORD */
 
@@ -197,15 +131,13 @@ void osd_getinput(void) {
     }
     update_crank_buttons();
 
-    unsigned t = 0;
-    if (current & kButtonRight) t |= REC_RIGHT;
-    if (current & kButtonLeft)  t |= REC_LEFT;
-    if (current & kButtonDown)  t |= REC_DOWN;
-    if (current & kButtonUp)    t |= REC_UP;
-    if (current & kButtonA)     t |= REC_A;
-    if (current & kButtonB)     t |= REC_B;
-    if (crank_start_down)       t |= REC_UP; /* Start -> UP token (replay bridge) */
-    rec_sample(t);
+    /* Record the effective buttons: crank Start becomes the UP token so the
+       replay build's UP->Start bridge reproduces it. */
+    PDButtons eff = current & (kButtonLeft | kButtonRight | kButtonUp |
+                               kButtonDown | kButtonA | kButtonB);
+    if (crank_start_down)
+        eff |= kButtonUp;
+    pd_playbench_record_sample(eff);
 #elif defined(PD_PLAYBENCH_ENABLED)
     /* Benchmark build: scripted input replaces real input (deterministic replay).
        The Playdate has no Start/Select buttons -- we map those to the crank,

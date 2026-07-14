@@ -66,9 +66,10 @@ if (TOOLCHAIN STREQUAL "armgcc")
 endif()
 
 # pd-playbench: scripted-input benchmark harness, dev-only (never in release)
-option(PD_PLAYBENCH "Build the pd-playbench scripted-input benchmark harness (dev only)" OFF)
-option(PD_PLAYBENCH_RECORD "Build the input recorder: dump a pd-playbench script from live play (dev only)" OFF)
-if (PD_PLAYBENCH)
+option(PD_PLAYBENCH "Build the pd-playbench scripted-input replay/benchmark (dev only)" OFF)
+option(PD_PLAYBENCH_RECORD "Build the pd-playbench recorder: capture a script from live play (dev only)" OFF)
+# Both modes link the library; RECORD additionally selects record behaviour.
+if (PD_PLAYBENCH OR PD_PLAYBENCH_RECORD)
     list(APPEND PLATFORM_SOURCES third_party/pd-playbench/src/pd_playbench.c)
 endif()
 
@@ -150,8 +151,8 @@ set(GAME_DEFINES
     $<$<BOOL:${DIAG}>:DIAG=1>
     $<$<BOOL:${DIAG_DRAW_FPS}>:DIAG_DRAW_FPS=1>
     $<$<BOOL:${DIAG_FPS_ONLY}>:DIAG_FPS_ONLY=1>
-    $<$<BOOL:${PD_PLAYBENCH}>:PD_PLAYBENCH_ENABLED=1>
-    $<$<BOOL:${PD_PLAYBENCH}>:PD_PLAYBENCH_MAX_COMMANDS=1024>
+    $<$<OR:$<BOOL:${PD_PLAYBENCH}>,$<BOOL:${PD_PLAYBENCH_RECORD}>>:PD_PLAYBENCH_ENABLED=1>
+    $<$<OR:$<BOOL:${PD_PLAYBENCH}>,$<BOOL:${PD_PLAYBENCH_RECORD}>>:PD_PLAYBENCH_MAX_COMMANDS=1024>
     $<$<BOOL:${PD_PLAYBENCH_RECORD}>:PD_PLAYBENCH_RECORD=1>
     $<$<BOOL:${DIAG}>:BUILD_TIMESTAMP="${BUILD_TIMESTAMP}">
     $<$<NOT:$<BOOL:${PPU_BG}>>:DISABLE_PPU_BG=1>
