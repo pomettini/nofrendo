@@ -99,6 +99,7 @@ option(NES_RAM_DTCM "Place the 2KB NES work RAM in the DTCM stack pool instead o
 option(DTCM_POOL_SCAN "Paint the DTCM pool with sentinels and report the clean run (discovery probe)" OFF)
 option(PPU_SPRITE_LIVE_CHR "Read sprite CHR live instead of the scanline-0 pattern cache (mid-frame bank-switch probe)" OFF)
 option(NES_IRQ_MAPPER_BATCH "Batch CPU across IRQ-free scanlines for hblank-IRQ mappers (MMC3 etc.) using the mapper IRQ countdown" OFF)
+option(NES_IRQ_MAPPER_BATCH_IRQ_SCOPE "Use per-scanline CPU execution from hardware IRQ entry through RTI" OFF)
 option(ALIGN_PRG_ROM "Align iNES PRG ROM start for cache experiments" OFF)
 option(DIAG_CPU_EXEC_TIMING "Time every nes6502_execute call in diagnostic builds" OFF)
 set(NES_CPU_BATCH_SCANLINES "1" CACHE STRING
@@ -180,6 +181,7 @@ set(GAME_DEFINES
     $<$<BOOL:${DTCM_POOL_SCAN}>:DTCM_POOL_SCAN=1>
     $<$<BOOL:${PPU_SPRITE_LIVE_CHR}>:PPU_SPRITE_LIVE_CHR=1>
     $<$<BOOL:${NES_IRQ_MAPPER_BATCH}>:NES_IRQ_MAPPER_BATCH=1>
+    $<$<BOOL:${NES_IRQ_MAPPER_BATCH_IRQ_SCOPE}>:NES_IRQ_MAPPER_BATCH_IRQ_SCOPE=1>
     $<$<BOOL:${ALIGN_PRG_ROM}>:ALIGN_PRG_ROM=1>
     $<$<BOOL:${DIAG_CPU_EXEC_TIMING}>:DIAG_CPU_EXEC_TIMING=1>
     NES_CPU_BATCH_SCANLINES=${NES_CPU_BATCH_SCANLINES}

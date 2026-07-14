@@ -373,6 +373,9 @@ void nes_renderframe(bool draw_flag)
 #endif
    int pending_cpu_lines = 0;
    int in_vblank = 0;
+#ifdef NES_IRQ_MAPPER_BATCH_IRQ_SCOPE
+   int irq_due_this_hblank = 0;
+#endif
 
    uint8 scanline[NES_SCREEN_WIDTH+16];
 
@@ -415,6 +418,16 @@ void nes_renderframe(bool draw_flag)
       }
 
 #ifdef NES_IRQ_MAPPER_BATCH
+#ifdef NES_IRQ_MAPPER_BATCH_IRQ_SCOPE
+      /* The old batcher flushed work before an imminent mapper IRQ, but then
+         deferred the firing scanline itself until the next batch boundary.
+         That let the PPU render ahead of the IRQ handler's CHR/scroll writes.
+         Remember the imminent IRQ so its scanline executes immediately after
+         hblank, matching the batch=1 ordering before the next PPU line. */
+      irq_due_this_hblank =
+         (!in_vblank && irq_countdown && irq_countdown() <= 1);
+      if (irq_due_this_hblank && pending_cpu_lines)
+#else
       /* If this hblank will fire the mapper IRQ (countdown <= 1), flush the
          pending CPU batch FIRST so the CPU has executed exactly through the
          previous scanline. The IRQ is then injected with correct timing and
@@ -422,6 +435,7 @@ void nes_renderframe(bool draw_flag)
          (batch=1) behaviour, but only paid at the one IRQ scanline per split
          instead of all 240 visible lines. */
       if (irq_countdown && pending_cpu_lines && irq_countdown() <= 1)
+#endif
       {
          EXECUTE_CPU_TIMED(NES_SCANLINE_CYCLES_INT());
          NES_SCANLINE_CYCLES_SUB(elapsed_cycles);
@@ -435,7 +449,11 @@ void nes_renderframe(bool draw_flag)
 
       NES_SCANLINE_CYCLES_ADD_LINE();
       pending_cpu_lines++;
-      if (pending_cpu_lines >= cpu_batch_lines || 241 == nes.scanline)
+      if (pending_cpu_lines >= cpu_batch_lines || 241 == nes.scanline
+#ifdef NES_IRQ_MAPPER_BATCH_IRQ_SCOPE
+          || irq_due_this_hblank || nes6502_irq_active()
+#endif
+         )
       {
          EXECUTE_CPU_TIMED(NES_SCANLINE_CYCLES_INT());
          NES_SCANLINE_CYCLES_SUB(elapsed_cycles);

@@ -150,6 +150,84 @@ Next single-variable control: `make install-bench-kirby-noirqbatch`, pair render
 window/menu would isolate the artifact to delayed IRQ-handler/PPU writes in the batcher;
 unchanged artifacts would move investigation into baseline PPU register semantics.
 
+Per-scanline MMC3 control result:
+
+| metric | IRQ batch ON | IRQ batch OFF | Batch delta |
+|---|---:|---:|---:|
+| `total_frames` / `measured_frames` | 2010 / 2010 | 2010 / 2010 | exact |
+| `elapsed_ms` | 40122 | 44349 | -4227 ms |
+| `avg_frame_ms` | 19.96 | 22.06 | **-2.10 ms** |
+| `worst_frame_ms` | 27.00 | 30.00 | -3.00 ms |
+| `slow_frames` | 828 | 1493 | -665 |
+| `skipped_frames` | 0 | 0 | 0 |
+| `estimated_fps` | 50.10 | 45.32 | +4.78 |
+
+Visual result: **zero glitches with IRQ batching OFF. Root cause isolated to
+`NES_IRQ_MAPPER_BATCH`.** The speedup is too large to discard without attempting a timing
+repair.
+
+Source audit found a concrete ordering bug: the batcher flushes accumulated CPU work before
+the hblank that fires an MMC3 IRQ, but the firing scanline is then accumulated into the next
+up-to-16-line batch. The 6502 therefore services the IRQ only after the PPU has rendered
+several later lines, delaying the handler's CHR/scroll writes and corrupting raster windows.
+
+First repair candidate forced the IRQ-firing scanline to execute immediately after hblank.
+Device result (`0.4-bench-kirby-irqsync`): **REJECTED — still glitchy.** It recovered all
+of the batching performance (`avg_frame_ms=19.99`, `estimated_fps=50.03`, 2,010/2,010
+frames) but did not restore clean windows. One ~113-cycle slice is insufficient because the
+handler can acknowledge/disable MMC3 near its start and continue changing PPU state later.
+
+Replacement candidate `NES_IRQ_MAPPER_BATCH_IRQ_SCOPE` (default OFF and explicitly OFF in
+`BASE_FLAGS`) tracks interrupt entry (`IRQ`, `NMI`, or `BRK`) through `RTI`. The scheduler
+uses per-scanline execution for that exact interval and resumes 16-line batching immediately
+after the handler returns. Test command: `make install-bench-kirby-irqscope`; expected label
+`0.4-bench-kirby-irqscope`. Pass gate remains zero glitches, 2,010/2,010 frames, and average
+time much closer to 19.96 ms than the 22.06 ms no-batch reference.
+
+Device result (`0.4-bench-kirby-irqscope`): **CORRECT, PARTIAL PERFORMANCE RECOVERY.**
+The replay completed 2,010/2,010 frames with zero graphical glitches, but the tester still
+noticed intermittent slowdowns.
+
+| metric | batch base (glitchy) | IRQ scope (clean) | no batch (clean) |
+|---|---:|---:|---:|
+| `elapsed_ms` | 40122 | 42053 | 44349 |
+| `avg_frame_ms` | 19.96 | **20.92** | 22.06 |
+| `worst_frame_ms` | 27.00 | 27.00 | 30.00 |
+| `slow_frames` | 828 | 1177 | 1493 |
+| `skipped_frames` | 0 | 0 | 0 |
+| `estimated_fps` | 50.10 | **47.80** | 45.32 |
+
+This recovers 1.14 ms of the 2.10 ms no-batch penalty, but remains 0.96 ms behind the
+glitchy batched baseline. Source review found the scope was broader than required: it
+marked the once-per-frame NMI handler and software `BRK` handlers active too. Kirby does
+substantial game work in NMI, so this likely suppresses batching for a large unrelated
+part of every frame.
+
+Next single-variable refinement: keep the same default-OFF
+`NES_IRQ_MAPPER_BATCH_IRQ_SCOPE` flag but mark only hardware `IRQ` entry active. A small
+interrupt-type stack preserves correct nesting, so an NMI inside an IRQ cannot end the
+outer IRQ scope early. `NMI` and `BRK` return to normal batching. Test command:
+`make install-bench-kirby-irqonly`; expected label `0.4-bench-kirby-irqonly`. Pass gate:
+zero glitches and performance closer to the 19.96 ms base than the 20.92 ms broad scope.
+
+Device performance result (`0.4-bench-kirby-irqonly`): **PERFORMANCE PASS, VISUAL GATE
+PENDING.** The replay completed all 2,010 frames with no skips.
+
+| metric | batch base (glitchy) | broad scope (clean) | IRQ-only |
+|---|---:|---:|---:|
+| `elapsed_ms` | 40122 | 42053 | **40453** |
+| `avg_frame_ms` | 19.96 | 20.92 | **20.13** |
+| `best_frame_ms` | 3.00 | 2.00 | 4.00 |
+| `worst_frame_ms` | 27.00 | 27.00 | 27.00 |
+| `slow_frames` | 828 | 1177 | **851** |
+| `skipped_frames` | 0 | 0 | 0 |
+| `estimated_fps` | 50.10 | 47.80 | **49.69** |
+
+Excluding NMI/BRK recovers 0.79 ms versus the broad handler scope and leaves only a
+0.17 ms cost versus the original glitchy batcher. Slow frames are within 23 of that
+baseline. Do not promote until the tester explicitly confirms the Kirby window/menu
+glitches remain absent in this narrower build.
+
 ---
 
 ## Rev B is a different CPU (STM32H7) — measured 2026-07-09

@@ -360,6 +360,8 @@ static const char *bench_find_rom(void) {
 #define BENCH_BUILD_LABEL "0.4-bench-kirby-bgpair"
 #elif !defined(NES_IRQ_MAPPER_BATCH)
 #define BENCH_BUILD_LABEL "0.4-bench-kirby-noirqbatch"
+#elif defined(NES_IRQ_MAPPER_BATCH_IRQ_SCOPE)
+#define BENCH_BUILD_LABEL "0.4-bench-kirby-irqonly"
 #else
 #define BENCH_BUILD_LABEL "0.4-bench-kirby-base"
 #endif

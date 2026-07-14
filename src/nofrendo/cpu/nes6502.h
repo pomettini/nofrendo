@@ -172,6 +172,9 @@ extern void nes6502_tcmhot_core_stats_snapshot(nes6502_tcmhot_core_stats_t *stat
 
 extern void nes6502_nmi(void);
 extern void nes6502_irq(void);
+#ifdef NES_IRQ_MAPPER_BATCH_IRQ_SCOPE
+extern bool nes6502_irq_active(void);
+#endif
 extern uint8 nes6502_getbyte(uint32 address);
 extern uint8 *nes6502_getbyteptr(uint32 address);
 extern uint32 nes6502_getcycles(bool reset_flag);

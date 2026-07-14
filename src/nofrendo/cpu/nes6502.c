@@ -559,6 +559,7 @@
 */
 #define NMI_PROC() \
 { \
+   INTERRUPT_SCOPE_ENTER(0); \
    PUSH(PC >> 8); \
    PUSH(PC & 0xFF); \
    b_flag = 0; \
@@ -569,6 +570,7 @@
 
 #define IRQ_PROC() \
 { \
+   INTERRUPT_SCOPE_ENTER(1); \
    PUSH(PC >> 8); \
    PUSH(PC & 0xFF); \
    b_flag = 0; \
@@ -800,6 +802,7 @@
 /* Software interrupt type thang */
 #define BRK() \
 { \
+   INTERRUPT_SCOPE_ENTER(0); \
    PC_SKIP_1(); \
    PUSH(PC >> 8); \
    PUSH(PC & 0xFF); \
@@ -1224,6 +1227,7 @@
 
 #define RTI() \
 { \
+   INTERRUPT_SCOPE_LEAVE(); \
    btemp = PULL(); \
    SCATTER_FLAGS(btemp); \
    PC = PULL(); \
@@ -1577,6 +1581,39 @@ uint32 nes6502_tcmhot_probe_call(uint32 magic)
 
 /* internal CPU context */
 static nes6502_context cpu;
+
+#ifdef NES_IRQ_MAPPER_BATCH_IRQ_SCOPE
+/* A 6502 interrupt frame consumes three bytes of its 256-byte stack, so 86
+   entries cover every representable nesting level. Record every interrupt
+   type so an NMI nested inside an IRQ cannot end the outer IRQ scope early. */
+#define INTERRUPT_SCOPE_STACK_SIZE 86
+static uint8 interrupt_scope_stack[INTERRUPT_SCOPE_STACK_SIZE];
+static int interrupt_scope_nesting;
+static int irq_scope_depth;
+#define INTERRUPT_SCOPE_ENTER(is_irq_) \
+   do { \
+      int scope_is_irq = (is_irq_); \
+      if (interrupt_scope_nesting < INTERRUPT_SCOPE_STACK_SIZE) \
+         interrupt_scope_stack[interrupt_scope_nesting] = (uint8) scope_is_irq; \
+      interrupt_scope_nesting++; \
+      if (scope_is_irq) \
+         irq_scope_depth++; \
+   } while (0)
+#define INTERRUPT_SCOPE_LEAVE() \
+   do { \
+      if (interrupt_scope_nesting > 0) \
+      { \
+         interrupt_scope_nesting--; \
+         if (interrupt_scope_nesting < INTERRUPT_SCOPE_STACK_SIZE \
+             && interrupt_scope_stack[interrupt_scope_nesting] \
+             && irq_scope_depth > 0) \
+            irq_scope_depth--; \
+      } \
+   } while (0)
+#else
+#define INTERRUPT_SCOPE_ENTER(is_irq_) do { (void) (is_irq_); } while (0)
+#define INTERRUPT_SCOPE_LEAVE() do { } while (0)
+#endif
 
 static int remaining_cycles = 0; /* so we can release timeslice */
 #ifdef NES6502_LAZY_CYCLES
@@ -3904,6 +3941,10 @@ void nes6502_reset(void)
    cpu.p_reg = Z_FLAG | R_FLAG | I_FLAG;     /* Reserved bit always 1 */
    cpu.int_pending = 0;                      /* No pending interrupts */
    cpu.int_latency = 0;                      /* No latent interrupts */
+#ifdef NES_IRQ_MAPPER_BATCH_IRQ_SCOPE
+   interrupt_scope_nesting = 0;
+   irq_scope_depth = 0;
+#endif
    cpu.pc_reg = bank_readword(RESET_VECTOR); /* Fetch reset vector */
    cpu.burn_cycles = RESET_CYCLES;
    cpu.jammed = false;
@@ -3951,6 +3992,13 @@ void nes6502_irq(void)
       STORE_LOCAL_REGS();
    }
 }
+
+#ifdef NES_IRQ_MAPPER_BATCH_IRQ_SCOPE
+bool nes6502_irq_active(void)
+{
+   return irq_scope_depth > 0;
+}
+#endif
 
 /* Set dead cycle period */
 void nes6502_burn(int cycles)
