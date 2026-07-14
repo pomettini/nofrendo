@@ -356,7 +356,13 @@ static const char *bench_find_rom(void) {
 #define BUNDLED_SCRIPT_PATH "nes_kirby_adventure_1_1.txt"
 #define BENCH_TEST_NAME "nes_kirby_adventure_1_1"
 #define BENCH_ROM_NAME "Kirby's Adventure"
-#ifdef PPU_BG_PAIR_FAST
+#if defined(ENABLE_LTO) && defined(PPU_BG_PAIR_FAST) && defined(NES_IRQ_MAPPER_BATCH_IRQ_SCOPE)
+#define BENCH_BUILD_LABEL "0.4-bench-kirby-lto"
+#elif defined(DIAG_CPU_EXEC_TIMING) && defined(PPU_BG_PAIR_FAST) && defined(NES_IRQ_MAPPER_BATCH_IRQ_SCOPE)
+#define BENCH_BUILD_LABEL "0.4-bench-kirby-profile"
+#elif defined(PPU_BG_PAIR_FAST) && defined(NES_IRQ_MAPPER_BATCH_IRQ_SCOPE)
+#define BENCH_BUILD_LABEL "0.4-bench-kirby-irqpair"
+#elif defined(PPU_BG_PAIR_FAST)
 #define BENCH_BUILD_LABEL "0.4-bench-kirby-bgpair"
 #elif !defined(NES_IRQ_MAPPER_BATCH)
 #define BENCH_BUILD_LABEL "0.4-bench-kirby-noirqbatch"

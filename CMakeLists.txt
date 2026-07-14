@@ -84,6 +84,7 @@ if (PD_PLAYBENCH OR PD_PLAYBENCH_RECORD)
 endif()
 
 option(DIAG        "Enable performance diagnostics (logToConsole every 60 frames)" OFF)
+option(ENABLE_LTO  "Enable link-time optimization for the device build" OFF)
 option(DIAG_DRAW_FPS "Draw Playdate's on-screen FPS HUD in diagnostic builds" OFF)
 option(DIAG_FPS_ONLY "Log only FPS windows without per-frame render timing" OFF)
 option(AUDIO       "Enable NES APU" OFF)
@@ -161,6 +162,7 @@ set(GAME_DEFINES
     $<$<BOOL:${AUDIO}>:AUDIO=1>
     $<$<AND:$<BOOL:${AUDIO}>,$<BOOL:${AUDIO_DIRECT_RING}>>:AUDIO_DIRECT_RING=1>
     $<$<BOOL:${DIAG}>:DIAG=1>
+    $<$<BOOL:${ENABLE_LTO}>:ENABLE_LTO=1>
     $<$<BOOL:${DIAG_DRAW_FPS}>:DIAG_DRAW_FPS=1>
     $<$<BOOL:${DIAG_FPS_ONLY}>:DIAG_FPS_ONLY=1>
     $<$<OR:$<BOOL:${PD_PLAYBENCH}>,$<BOOL:${PD_PLAYBENCH_RECORD}>>:PD_PLAYBENCH_ENABLED=1>
@@ -252,6 +254,17 @@ add_custom_command(
 # and wins. Re-append -O3 here so it is the last optimisation flag on the command line.
 if (TOOLCHAIN STREQUAL "armgcc")
     target_compile_options(${PLAYDATE_GAME_DEVICE} PRIVATE -O3)
+    if (ENABLE_LTO)
+        target_compile_options(${PLAYDATE_GAME_DEVICE} PRIVATE -flto)
+        target_link_options(${PLAYDATE_GAME_DEVICE} PRIVATE -flto)
+        # Keep the SDK allocator bridge as a concrete object. GCC 9's LTO
+        # plugin otherwise internalizes its newlib `_realloc_r` definition
+        # before archive resolution and the final link cannot satisfy libc.
+        set_source_files_properties(
+            "${SDK}/C_API/buildsupport/setup.c"
+            PROPERTIES COMPILE_OPTIONS "-fno-lto"
+        )
+    endif()
 
     # Keep 6502 flags measurable: code shape and I-cache pressure both matter.
     set(NES6502_COMPILE_FLAGS

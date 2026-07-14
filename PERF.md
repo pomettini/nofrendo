@@ -225,8 +225,91 @@ PENDING.** The replay completed all 2,010 frames with no skips.
 
 Excluding NMI/BRK recovers 0.79 ms versus the broad handler scope and leaves only a
 0.17 ms cost versus the original glitchy batcher. Slow frames are within 23 of that
-baseline. Do not promote until the tester explicitly confirms the Kirby window/menu
-glitches remain absent in this narrower build.
+baseline. The tester explicitly confirmed **zero graphical glitches**, including the
+Kirby window/menu path. **IRQ-only passes both correctness and performance gates.** Keep
+the implementation for broader MMC3 validation; it remains default OFF and unpromoted in
+the production flags until the next combined row is complete.
+
+Next single-variable row relative to IRQ-only: enable the independently measured
+`PPU_BG_PAIR_FAST` renderer. It previously saved 0.74 ms on this exact Kirby replay and
+was proven not to cause the IRQ/window artifacts. Test command:
+`make install-bench-kirby-irqpair`; expected label `0.4-bench-kirby-irqpair`. Hypothesis:
+zero glitches and approximately 19.4 ms average, enough to put the Rev B safely above the
+50 fps budget. This reduces absolute PPU work and should help Rev A too, but cannot by
+itself remove that hardware's known interpreter/PRG-ROM D-cache ceiling.
+
+Device result (`0.4-bench-kirby-irqpair`): **CORRECT, MARGINAL SPEEDUP.** The tester
+confirmed zero graphical glitches and the replay completed all 2,010 frames with no skips.
+
+| metric | IRQ-only | IRQ-only + BG pair | Pair delta |
+|---|---:|---:|---:|
+| `elapsed_ms` | 40453 | **40230** | -223 ms |
+| `avg_frame_ms` | 20.13 | **20.01** | **-0.12 ms** |
+| `worst_frame_ms` | 27.00 | 27.00 | 0.00 ms |
+| `slow_frames` | 851 | **826** | -25 |
+| `skipped_frames` | 0 | 0 | 0 |
+| `estimated_fps` | 49.69 | **49.96** | +0.27 |
+
+The pair renderer remains a small safe win, but it did not reproduce its isolated 0.74 ms
+delta and does not provide stable 50 fps headroom. Do not infer Rev-A playability from this
+H7 result. Before another speed flag, profile this exact corrected stack with
+`DIAG_CPU_EXEC_TIMING` to separate interpreter, scheduler/mapper, and PPU costs. The
+instrumented total frame time is diagnostic only and must not be compared directly with
+the uninstrumented benchmark.
+
+Diagnostic result (`0.4-bench-kirby-profile`, H7): **BUSY-SCENE DELTA IS ENTIRELY 6502
+EXECUTION.** `DIAG_CPU_EXEC_TIMING` adds a millisecond timer around each interpreter call;
+the benchmark forces every frame to draw for determinism, so `cpu_only=0` is expected and
+the final `avg_frame_ms=20.40` is not a candidate-performance result. Across its 60-frame
+windows:
+
+| replay region | wall avg | `nes_renderframe` (`ppu_full`) | 6502 execute (`ppu_exec`) | render non-execute |
+|---|---:|---:|---:|---:|
+| early, frames 1-360 | 19.67 ms | 12.33 ms | 5.17 ms | 7.16 ms |
+| busy, frames 900-1980 | 21.47 ms | 16.63 ms | 9.53 ms | 7.10 ms |
+| all 33 complete windows | 20.88 ms | 15.42 ms | 8.42 ms | 7.00 ms |
+
+From the early section to the busy section, `nes_renderframe` rises 4.30 ms while measured
+6502 execution rises 4.36 ms; the PPU/mapper/non-interpreter remainder is flat within the
+timer's 1 ms resolution. Therefore the remaining instability is game-dependent 6502 work,
+not the corrected IRQ scheduler or renderer. This agrees with the earlier full-level Kirby
+PRG profile and Rev-A campaign: busy execution spreads across the 32 KB PRG working set,
+while hot-page DTCM relocation, interpreter relocation, dispatch/layout changes, and cycle
+trimming were already measured flat or unsafe. No further incremental speed flag is
+justified; a material Rev-A improvement would require a structural CPU solution such as a
+dynarec.
+
+The user requested one final squeeze specifically for probable Rev-A performance. One
+compiler-level avenue was not covered by the prior runtime campaign: whole-program
+link-time optimization. Candidate `ENABLE_LTO` is default OFF and explicitly OFF in
+`BASE_FLAGS`; `make install-bench-kirby-lto` adds only LTO to the corrected IRQ-pair
+benchmark and reports `0.4-bench-kirby-lto`. This is semantically low-risk, avoids the
+writable-executable-memory failure of a dynarec, and may reduce cross-translation-unit
+call overhead or code size. Gate it strictly on device numbers: zero glitches, exact
+2,010-frame replay, and an improvement larger than ordinary run noise versus the 20.01 ms
+IRQ-pair reference. If flat, reject LTO and stop looking for compiler switches.
+
+First device result (`0.4-bench-kirby-lto`): **CORRECT, MARGINAL PERFORMANCE GAIN.** The
+exact replay completed 2,010/2,010 frames with no skips, and the tester explicitly
+confirmed zero graphical issues.
+
+| metric | IRQ-pair | IRQ-pair + LTO | LTO delta |
+|---|---:|---:|---:|
+| `elapsed_ms` | 40230 | **39958** | -272 ms |
+| `avg_frame_ms` | 20.01 | **19.88** | **-0.13 ms** |
+| `worst_frame_ms` | 27.00 | 27.00 | 0.00 ms |
+| `slow_frames` | 826 | **799** | -27 |
+| `estimated_fps` | 49.96 | **50.30** | +0.34 |
+
+This is a 0.7% improvement, comparable in size to the marginal pair-renderer gain rather
+than a new tier of performance. Static layout is a Rev-A concern: device `.text` grew from
+124,852 to 151,876 bytes, `nes6502_execute` from 10,792 to 11,092 bytes, and LTO folded the
+PPU path into a 7,188-byte `nes_renderframe.constprop.0`. The alternating interpreter and
+renderer hot code therefore exceed the F746's 16 KB I-cache by more than the non-LTO
+layout. Do not promote from the H7 number alone. A size-bounded LTO variant that limits
+cross-file inlining while retaining whole-program simplification remains plausible, but
+its performance gate must be run on an F746 Rev A because H7 cache behavior cannot select
+between the two layouts.
 
 ---
 
