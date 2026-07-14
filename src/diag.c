@@ -50,6 +50,12 @@ extern PlaydateAPI *pd;
 #define DIAG_BLIT "on"
 #endif
 
+#ifdef PPU_BG_PAIR_FAST
+#define DIAG_BG_PAIR "on"
+#else
+#define DIAG_BG_PAIR "off"
+#endif
+
 #ifdef DIAG_DRAW_FPS
 #define DIAG_HUD_FPS "on"
 #define DIAG_LCD_DIRTY "all"
@@ -368,6 +374,7 @@ void diag_frame_begin(void) {
                                  " bg=" DIAG_BG
                                  " sprites=" DIAG_SPRITES
                                  " blit=" DIAG_BLIT
+                                 " bg_pair=" DIAG_BG_PAIR
                                  " hudfps=" DIAG_HUD_FPS
                                  " lcd_dirty=" DIAG_LCD_DIRTY
                                  " ppu_strike=" DIAG_PPU_STRIKE

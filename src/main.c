@@ -248,6 +248,10 @@ static int picker_update(void *userdata) {
   return 1;
 }
 
+#ifdef PD_PLAYBENCH_RECORD_KIRBY
+static void rec_launch_rom(const char *path, void *userdata);
+#endif
+
 static void start_rom_picker(void) {
   pd->system->removeAllMenuItems();
   clear_menu_handles();
@@ -257,7 +261,11 @@ static void start_rom_picker(void) {
   RomPickerConfig config = {
       .folder = ROM_PICKER_FOLDER,
       .extensions = extensions,
+#ifdef PD_PLAYBENCH_RECORD_KIRBY
+      .on_select = rec_launch_rom,
+#else
       .on_select = launch_rom,
+#endif
       .userdata = NULL,
       .auto_load_single = 0,
   };
@@ -274,10 +282,16 @@ static char bench_fallback_path[ROM_PICKER_MAX_PATH];
 static int bench_rom_found;
 static int bench_fallback_found;
 
-static int bench_name_has_mario(const char *s) {
+static int bench_name_has_target(const char *s) {
+  const char *target =
+#ifdef PD_PLAYBENCH_KIRBY
+      "kirby";
+#else
+      "mario";
+#endif
   for (; *s; s++) {
     const char *a = s;
-    const char *m = "mario";
+    const char *m = target;
     while (*a && *m) {
       char ca = (*a >= 'A' && *a <= 'Z') ? (char)(*a + 32) : *a;
       if (ca != *m)
@@ -309,21 +323,24 @@ static void bench_scan_file(const char *filename, void *ud) {
              ROM_PICKER_FOLDER, filename);
     bench_fallback_found = 1;
   }
-  if (!bench_rom_found && bench_name_has_mario(filename)) {
+  if (!bench_rom_found && bench_name_has_target(filename)) {
     snprintf(bench_rom_path, sizeof(bench_rom_path), "%s%s", ROM_PICKER_FOLDER,
              filename);
     bench_rom_found = 1;
   }
 }
 
-/* Find a "mario" ROM in the games folder (else the first .nes). NULL if none. */
+/* Find the requested benchmark ROM in the games folder. Mario retains the
+   historical first-ROM fallback; Kirby refuses to run against the wrong ROM. */
 static const char *bench_find_rom(void) {
   bench_rom_found = 0;
   bench_fallback_found = 0;
   pd->file->listfiles(ROM_PICKER_FOLDER, bench_scan_file, NULL, 0);
-  return bench_rom_found        ? bench_rom_path
+  return bench_rom_found ? bench_rom_path
+#ifndef PD_PLAYBENCH_KIRBY
          : bench_fallback_found ? bench_fallback_path
-                                : NULL;
+#endif
+                           : NULL;
 }
 #endif /* shared benchmark/record harness */
 
@@ -334,17 +351,41 @@ static const char *bench_find_rom(void) {
 #if defined(PD_PLAYBENCH_ENABLED) && !defined(PD_PLAYBENCH_RECORD)
 /* Recorded script written by the record build; must match REC_SCRIPT_PATH in
    keyboard.c. Loaded in preference to the built-in script when present. */
+#ifdef PD_PLAYBENCH_KIRBY
+#define REC_SCRIPT_PATH "/Shared/Emulation/nes/kirby_1_1.txt"
+#define BUNDLED_SCRIPT_PATH "nes_kirby_adventure_1_1.txt"
+#define BENCH_TEST_NAME "nes_kirby_adventure_1_1"
+#define BENCH_ROM_NAME "Kirby's Adventure"
+#ifdef PPU_BG_PAIR_FAST
+#define BENCH_BUILD_LABEL "0.4-bench-kirby-bgpair"
+#elif !defined(NES_IRQ_MAPPER_BATCH)
+#define BENCH_BUILD_LABEL "0.4-bench-kirby-noirqbatch"
+#else
+#define BENCH_BUILD_LABEL "0.4-bench-kirby-base"
+#endif
+#else
 #define REC_SCRIPT_PATH "/Shared/Emulation/nes/rec_script.txt"
+#define BUNDLED_SCRIPT_PATH "nes_smb1_world_1_1.txt"
+#define BENCH_TEST_NAME "nes_smb1_world_1_1"
+#define BENCH_ROM_NAME "Super Mario Bros"
+#ifdef PPU_BG_PAIR_FAST
+#define BENCH_BUILD_LABEL "0.4-bench-bgpair"
+#else
+#define BENCH_BUILD_LABEL "0.4-bench"
+#endif
+#endif
 
 /* Minimal fallback, used only if neither the /Shared override nor the bundled
    script is present: boot the game and idle briefly, then stop. The real
    benchmark is the committed, bundled nes_smb1_world_1_1.txt recording. */
+#ifndef PD_PLAYBENCH_KIRBY
 static const char *bench_build_script(void) {
   return "wait 200\n"   /* title screen */
          "hold UP 10\n" /* press Start   */
          "wait 600\n"   /* smoke-test idle */
          "stop\n";
 }
+#endif
 
 static void bench_run(void) {
   const char *path = bench_find_rom();
@@ -365,10 +406,10 @@ static void bench_run(void) {
   pd->file->mkdir("benchmarks"); /* report destination must exist */
 
   PDBenchConfig cfg = {
-      .test_name = "nes_smb1_world_1_1",
+      .test_name = BENCH_TEST_NAME,
       .emulator_name = "nofrendo",
-      .rom_name = "Super Mario Bros",
-      .build_label = "0.3-bench",
+      .rom_name = BENCH_ROM_NAME,
+      .build_label = BENCH_BUILD_LABEL,
       .device_label = "device",
       .report_path = "benchmarks/latest.txt",
       .target_fps = 50,
@@ -377,16 +418,23 @@ static void bench_run(void) {
       .input_mode = PD_PLAYBENCH_INPUT_OVERRIDE,
   };
   pd_playbench_init(pd, &cfg);
-  /* Load order: a /Shared recording (iterate with make bench-record), then the
-     committed script bundled in the .pdx, then the minimal fallback. */
+  /* Load order: the matching /Shared recording, then the committed script
+     bundled in the .pdx. Mario alone retains its minimal smoke fallback. */
   if (pd_playbench_load_script_from_file(REC_SCRIPT_PATH)) {
     pd->system->logToConsole("[bench] loaded override %s", REC_SCRIPT_PATH);
-  } else if (pd_playbench_load_script_from_file("nes_smb1_world_1_1.txt")) {
+  } else if (pd_playbench_load_script_from_file(BUNDLED_SCRIPT_PATH)) {
     pd->system->logToConsole("[bench] loaded bundled script");
+#ifndef PD_PLAYBENCH_KIRBY
   } else if (!pd_playbench_load_script_from_string(bench_build_script())) {
     pd->system->logToConsole("[bench] script error: %s",
                              pd_playbench_get_last_error());
     return;
+#else
+  } else {
+    pd->system->logToConsole("[bench] missing Kirby script: %s",
+                             pd_playbench_get_last_error());
+    return;
+#endif
   }
   pd_playbench_start();
   pd->system->logToConsole("[bench] script started: %s", cfg.test_name);
@@ -401,18 +449,9 @@ static void rec_dump_menu(void *ud) {
   osd_rec_dump();
 }
 
-/* Auto-load the Mario ROM and let the player play it live; pd-playbench records
-   the effective buttons each frame (sampled in osd_getinput). "Dump script" in
-   the system menu saves the replayable script. */
-static void rec_run(void) {
-  const char *path = bench_find_rom();
-  if (!path) {
-    pd->system->logToConsole("[rec] no .nes ROM in %s; opening picker",
-                             ROM_PICKER_FOLDER);
-    start_rom_picker();
-    return;
-  }
-
+/* Launch one ROM and begin recording the effective buttons each emulated frame.
+   "Dump script" in the system menu saves the replayable script. */
+static void rec_start_rom(const char *path) {
   pd->system->logToConsole(
       "[rec] recording %s -- play it, then pick 'Dump script' from the menu",
       path);
@@ -429,6 +468,31 @@ static void rec_run(void) {
   clear_menu_handles();
   pd->system->addMenuItem("Dump script", rec_dump_menu, NULL);
 }
+
+#ifdef PD_PLAYBENCH_RECORD_KIRBY
+static void rec_launch_rom(const char *path, void *userdata) {
+  (void)userdata;
+  rec_start_rom(path);
+}
+
+static void rec_run(void) {
+  pd->system->logToConsole(
+      "[rec] Kirby recorder ready -- choose the Kirby ROM from the picker");
+  start_rom_picker();
+}
+#else
+/* The original Mario recorder retains its auto-load workflow. */
+static void rec_run(void) {
+  const char *path = bench_find_rom();
+  if (!path) {
+    pd->system->logToConsole("[rec] no .nes ROM in %s; opening picker",
+                             ROM_PICKER_FOLDER);
+    start_rom_picker();
+    return;
+  }
+  rec_start_rom(path);
+}
+#endif
 #endif /* PD_PLAYBENCH_RECORD */
 
 int eventHandler(PlaydateAPI *playdate, PDSystemEvent event, uint32_t arg) {
@@ -447,7 +511,7 @@ int eventHandler(PlaydateAPI *playdate, PDSystemEvent event, uint32_t arg) {
     run_tcmhot_probe();
 #endif
 #if defined(PD_PLAYBENCH_RECORD)
-    rec_run();   /* auto-load Mario for a live recording session */
+    rec_run();   /* start the selected live-recording workflow */
 #elif defined(PD_PLAYBENCH_ENABLED)
     bench_run(); /* auto-load Mario and replay the scripted benchmark */
 #else

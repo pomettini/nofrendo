@@ -2,6 +2,6 @@ name=FamiCrank
 author=Pomettini & nwagyu
 description=NES emulator
 bundleID=com.pomettini.nofrendo
-version=0.3
+version=0.4
 buildNumber=2
 imagePath=SystemAssets/

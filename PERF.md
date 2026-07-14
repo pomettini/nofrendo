@@ -52,6 +52,106 @@ remains logged so the privileged cache-maintenance experiment is not repeated.
 
 ---
 
+## Two-tile background renderer probe — 2026-07-14
+
+Hypothesis: for the common mapper path where `ppu.latchfunc == NULL`, background
+attribute palettes can be advanced once per aligned pair of tiles. Rendering two tiles
+per loop iteration removes 16 loop-control operations and all 33 per-tile latch checks
+per drawn scanline. The exact existing renderer remains active for MMC2/MMC4 latch games.
+
+Build flag: `PPU_BG_PAIR_FAST`, default **OFF**. Test command:
+`make install-bench-bgpair`.
+
+Keep gate against the 15.77 ms Rev B baseline: all 2879 deterministic SMB frames must
+complete, `slow_frames=0`, `skipped_frames=0`, `worst_frame_ms <= 20`, and average frame
+time must improve by at least approximately 0.2 ms.
+
+First device run (`build=0.3-bench-bgpair`, before correcting the package version to 0.4):
+
+| metric | baseline | pair probe | delta |
+|---|---:|---:|---:|
+| `elapsed_ms` | 45411.00 | 44257.00 | -1154.00 |
+| `avg_frame_ms` | 15.77 | **15.37** | **-0.40 (-2.5%)** |
+| `worst_frame_ms` | 20.00 | 21.00 | +1.00 |
+| `slow_frames` | 0 | 2 | +2 |
+| `skipped_frames` | 0 | 0 | 0 |
+| `estimated_fps` | 63.40 | 65.05 | +1.65 |
+
+All 2879 frames completed, so the correctness guard passed and the average-time win is
+well above the keep threshold. This run is **provisional**, however: two 21 ms frames miss
+the tail-latency gate. Repeat the identical probe as `build=0.4-bench-bgpair`; promote only
+if the confirmation run clears the full gate.
+
+Confirmation device run (`build=0.4-bench-bgpair`):
+
+| metric | baseline | confirmation | delta |
+|---|---:|---:|---:|
+| `elapsed_ms` | 45411.00 | 44628.00 | -783.00 |
+| `avg_frame_ms` | 15.77 | **15.50** | **-0.27 (-1.7%)** |
+| `worst_frame_ms` | 20.00 | 20.00 | 0.00 |
+| `slow_frames` | 0 | 0 | 0 |
+| `skipped_frames` | 0 | 0 | 0 |
+| `estimated_fps` | 63.40 | 64.51 | +1.11 |
+
+**Decision: KEEP for broader game validation.** The confirmation passes every gate,
+including all 2879 frames and the approximately 0.2 ms minimum-win threshold. The option
+remains default OFF and is not added to the production `FAST_FLAGS` yet. Validate Kirby
+with the normal ROM picker and diagnostic timing via `make install-diag-bgpair`; its banner
+must report `bg_pair=on`.
+
+### Kirby deterministic smoke test — 2026-07-15
+
+Fresh-SRAM replay of Kirby's Adventure from title/file creation through the first 2,010
+frames of 1-1. The original 4,782-frame capture was truncated immediately before a door
+whose entry did not replay reliably; the retained prefix is deterministic and long enough
+to cover the heavy MMC3 gameplay window. Battery SRAM loading and saving are suppressed
+only in the dedicated Kirby record/replay builds, so benchmark runs start fresh without
+touching the user's real save.
+
+First device row, with `PPU_BG_PAIR_FAST=ON`:
+
+| metric | Kirby bg-pair |
+|---|---:|
+| `total_frames` / `measured_frames` | 2010 / 2010 |
+| `elapsed_ms` | 38638 |
+| `avg_frame_ms` | 19.22 |
+| `best_frame_ms` | 3.00 |
+| `worst_frame_ms` | 26.00 |
+| `slow_frames` | 605 |
+| `skipped_frames` | 0 |
+| `estimated_fps` | 52.02 |
+
+Correctness result: **graphical glitches appear after a repeatable point in the frame.**
+Do not begin further performance work or promote the pair renderer until isolated. First
+A/B control: `make install-bench-kirby-base`, identical replay and FAST_FLAGS with only
+`PPU_BG_PAIR_FAST=OFF`. If the glitch disappears, reject/fix the pair renderer. If it
+remains, test the existing MMC3 IRQ batching next; its original validation explicitly left
+the status-bar/split position as an open visual check.
+
+Background-pair OFF control result:
+
+| metric | bg-pair ON | bg-pair OFF | Pair delta |
+|---|---:|---:|---:|
+| `total_frames` / `measured_frames` | 2010 / 2010 | 2010 / 2010 | exact |
+| `elapsed_ms` | 38638 | 40122 | -1484 ms |
+| `avg_frame_ms` | 19.22 | 19.96 | **-0.74 ms** |
+| `worst_frame_ms` | 26.00 | 27.00 | -1.00 ms |
+| `slow_frames` | 605 | 828 | -223 |
+| `skipped_frames` | 0 | 0 | 0 |
+| `estimated_fps` | 52.02 | 50.10 | +1.92 |
+
+Visual result: glitches are unchanged with the pair renderer OFF, especially in Kirby's
+save-selection/menu window graphics. **The pair renderer is not the cause.** It produces a
+clear performance improvement on this exact heavy MMC3 replay, but remains unpromoted while
+the underlying correctness issue is isolated.
+
+Next single-variable control: `make install-bench-kirby-noirqbatch`, pair renderer OFF and
+`NES_IRQ_MAPPER_BATCH=OFF`. This restores the old per-scanline MMC3 execution path. A clean
+window/menu would isolate the artifact to delayed IRQ-handler/PPU writes in the batcher;
+unchanged artifacts would move investigation into baseline PPU register semantics.
+
+---
+
 ## Rev B is a different CPU (STM32H7) — measured 2026-07-09
 
 The whole log below is the **original Playdate, STM32F746** (16KB I-cache + 16KB D-cache).

@@ -403,6 +403,15 @@ static void osd_sram_path(const char *rom_path, char *out, size_t outsz) {
 }
 
 int osd_load_sram(const char *rom_path, unsigned char *sram, int len) {
+#ifdef PD_PLAYBENCH_FRESH_SRAM
+    /* Deterministic Kirby record/replay starts from the cart's zero-filled
+       battery RAM and must never inherit the player's persistent save. */
+    (void)rom_path;
+    (void)sram;
+    (void)len;
+    pd->system->logToConsole("[sram] fresh benchmark mode: load suppressed");
+    return -1;
+#else
     char fn[PATH_MAX + 1];
     osd_sram_path(rom_path, fn, sizeof(fn));
 
@@ -413,9 +422,19 @@ int osd_load_sram(const char *rom_path, unsigned char *sram, int len) {
     int n = pd->file->read(f, sram, (unsigned int)len);
     pd->file->close(f);
     return (n == len) ? 0 : -1;
+#endif
 }
 
 int osd_save_sram(const char *rom_path, const unsigned char *sram, int len) {
+#ifdef PD_PLAYBENCH_FRESH_SRAM
+    /* Opening the system menu to dump a recording triggers a save flush. Do
+       not let a test session overwrite the user's real battery save. */
+    (void)rom_path;
+    (void)sram;
+    (void)len;
+    pd->system->logToConsole("[sram] fresh benchmark mode: save suppressed");
+    return -1;
+#else
     char fn[PATH_MAX + 1];
     osd_sram_path(rom_path, fn, sizeof(fn));
 
@@ -431,6 +450,7 @@ int osd_save_sram(const char *rom_path, const unsigned char *sram, int len) {
     int n = pd->file->write(f, (void *)sram, (unsigned int)len);
     pd->file->close(f);
     return (n == len) ? 0 : -1;
+#endif
 }
 
 int osd_makesnapname(char *filename, int len) {

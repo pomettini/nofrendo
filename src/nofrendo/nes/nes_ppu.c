@@ -798,44 +798,109 @@ static void ppu_renderbg(uint8 *vidbuf)
    attrib_shift = (x_tile & 2) + ((y_tile & 2) << 1);
    col_high = ((attrib >> attrib_shift) & 3) << 2;
 
-   /* ppu fetches 33 tiles */
-   tile_count = 33;
-   while (tile_count--)
+#ifdef PPU_BG_PAIR_FAST
+   /* The normal path has no MMC2/MMC4 latch callback. Attribute palettes span
+    * two horizontal tiles, so consume aligned pairs while preserving the odd
+    * start, nametable seam, and final 33rd-tile cases exactly. */
+   if (NULL == ppu.latchfunc)
    {
-      /* Tile number from nametable */
-      tile_index = *tile_ptr++;
-      data_ptr = &PPU_MEM(bg_offset + (tile_index << 4));
+#define DRAW_BG_TILE_NO_LATCH()                                                \
+      do                                                                       \
+      {                                                                        \
+         tile_index = *tile_ptr++;                                             \
+         data_ptr = &PPU_MEM(bg_offset + (tile_index << 4));                   \
+         draw_bgtile(bmp_ptr, data_ptr[0], data_ptr[8], pal + col_high);        \
+         bmp_ptr += 8;                                                         \
+      } while (0)
 
-      /* Handle $FD/$FE tile VROM switching (PunchOut) */
-      if (ppu.latchfunc)
-         ppu.latchfunc(ppu.bg_base, tile_index);
+#define ADVANCE_BG_ATTRIBUTE()                                                 \
+      do                                                                       \
+      {                                                                        \
+         if (0 == (x_tile & 3))                                                \
+         {                                                                     \
+            if (32 == x_tile)                                                  \
+            {                                                                  \
+               x_tile = 0;                                                     \
+               refresh_vaddr ^= (1 << 10);                                     \
+               attrib_base ^= (1 << 10);                                       \
+               tile_ptr = &PPU_MEM(refresh_vaddr);                             \
+               attrib_ptr = &PPU_MEM(attrib_base);                             \
+            }                                                                  \
+            attrib = *attrib_ptr++;                                            \
+         }                                                                     \
+         attrib_shift ^= 2;                                                    \
+         col_high = ((attrib >> attrib_shift) & 3) << 2;                       \
+      } while (0)
 
-      draw_bgtile(bmp_ptr, data_ptr[0], data_ptr[8], pal + col_high);
-      bmp_ptr += 8;
+      tile_count = 33;
 
-      x_tile++;
-
-      if (0 == (x_tile & 1))     /* check every 2 tiles */
+      if (x_tile & 1)
       {
-         if (0 == (x_tile & 3))  /* check every 4 tiles */
-         {
-            if (32 == x_tile)    /* check every 32 tiles */
-            {
-               x_tile = 0;
-               refresh_vaddr ^= (1 << 10); /* switch nametable */
-               attrib_base ^= (1 << 10);
+         DRAW_BG_TILE_NO_LATCH();
+         x_tile++;
+         tile_count--;
+         ADVANCE_BG_ATTRIBUTE();
+      }
 
-               /* recalculate pointers */
-               tile_ptr = &PPU_MEM(refresh_vaddr);
-               attrib_ptr = &PPU_MEM(attrib_base);
+      while (tile_count >= 2)
+      {
+         DRAW_BG_TILE_NO_LATCH();
+         DRAW_BG_TILE_NO_LATCH();
+         x_tile += 2;
+         tile_count -= 2;
+
+         if (tile_count)
+            ADVANCE_BG_ATTRIBUTE();
+      }
+
+      if (tile_count)
+         DRAW_BG_TILE_NO_LATCH();
+
+#undef ADVANCE_BG_ATTRIBUTE
+#undef DRAW_BG_TILE_NO_LATCH
+   }
+   else
+#endif
+   {
+      /* ppu fetches 33 tiles */
+      tile_count = 33;
+      while (tile_count--)
+      {
+         /* Tile number from nametable */
+         tile_index = *tile_ptr++;
+         data_ptr = &PPU_MEM(bg_offset + (tile_index << 4));
+
+         /* Handle $FD/$FE tile VROM switching (PunchOut) */
+         if (ppu.latchfunc)
+            ppu.latchfunc(ppu.bg_base, tile_index);
+
+         draw_bgtile(bmp_ptr, data_ptr[0], data_ptr[8], pal + col_high);
+         bmp_ptr += 8;
+
+         x_tile++;
+
+         if (0 == (x_tile & 1))     /* check every 2 tiles */
+         {
+            if (0 == (x_tile & 3))  /* check every 4 tiles */
+            {
+               if (32 == x_tile)    /* check every 32 tiles */
+               {
+                  x_tile = 0;
+                  refresh_vaddr ^= (1 << 10); /* switch nametable */
+                  attrib_base ^= (1 << 10);
+
+                  /* recalculate pointers */
+                  tile_ptr = &PPU_MEM(refresh_vaddr);
+                  attrib_ptr = &PPU_MEM(attrib_base);
+               }
+
+               /* Get the attribute byte */
+               attrib = *attrib_ptr++;
             }
 
-            /* Get the attribute byte */
-            attrib = *attrib_ptr++;
+            attrib_shift ^= 2;
+            col_high = ((attrib >> attrib_shift) & 3) << 2;
          }
-
-         attrib_shift ^= 2;
-         col_high = ((attrib >> attrib_shift) & 3) << 2;
       }
    }
 

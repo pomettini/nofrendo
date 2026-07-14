@@ -1,0 +1,135 @@
+wait 57
+hold A 3
+wait 46
+hold A 3
+wait 6
+hold A 2
+wait 7
+hold A 2
+wait 6
+hold A 2
+wait 6
+hold A 3
+wait 6
+hold A 3
+wait 7
+hold A 3
+wait 6
+hold A 2
+wait 32
+hold A 4
+wait 38
+hold A 4
+wait 7
+hold A 4
+wait 47
+hold A 3
+wait 19
+hold A 3
+wait 21
+hold A 4
+wait 174
+hold LEFT 13
+wait 46
+hold UP 8
+wait 76
+hold RIGHT 3
+wait 7
+hold RIGHT 4
+wait 5
+hold RIGHT 4
+wait 4
+hold RIGHT 4
+wait 4
+hold RIGHT 5
+wait 4
+hold RIGHT 98
+hold RIGHT+B 12
+hold B 22
+wait 5
+hold DOWN 17
+wait 23
+hold RIGHT 26
+hold RIGHT+A 15
+hold RIGHT 5
+wait 3
+hold B 58
+wait 11
+hold RIGHT 2
+hold RIGHT+A 8
+hold A 1
+wait 3
+hold B 29
+wait 7
+hold RIGHT 2
+wait 6
+hold RIGHT 3
+wait 5
+hold RIGHT 3
+wait 5
+hold RIGHT 62
+hold RIGHT+B 35
+hold RIGHT 6
+wait 7
+hold RIGHT 4
+wait 5
+hold RIGHT 4
+wait 3
+hold RIGHT 35
+hold RIGHT+B 6
+hold B 31
+wait 33
+hold A 2
+hold RIGHT+A 6
+hold RIGHT 3
+wait 2
+hold B 36
+wait 12
+hold RIGHT 3
+wait 7
+hold RIGHT 3
+wait 5
+hold RIGHT 3
+wait 5
+hold RIGHT 4
+wait 2
+hold RIGHT 58
+hold RIGHT+B 26
+hold RIGHT 3
+wait 4
+hold RIGHT 2
+wait 44
+hold A 1
+hold LEFT+A 15
+hold LEFT 2
+hold LEFT+B 46
+hold B 4
+wait 10
+hold RIGHT 40
+hold RIGHT+A 14
+hold RIGHT 37
+wait 1
+hold UP 42
+hold RIGHT+UP 1
+hold RIGHT 35
+hold RIGHT+B 4
+hold RIGHT 59
+hold RIGHT+B 9
+hold B 19
+wait 6
+hold DOWN 18
+wait 16
+hold RIGHT 4
+wait 9
+hold RIGHT 3
+wait 5
+hold RIGHT 5
+wait 4
+hold RIGHT 4
+wait 5
+hold RIGHT 4
+wait 4
+hold RIGHT 3
+wait 3
+hold RIGHT 31
+stop

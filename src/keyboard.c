@@ -103,11 +103,15 @@ void osd_input_init(void) {
 
 #ifdef PD_PLAYBENCH_RECORD
 /* The recorder itself lives in pd-playbench; this file just samples the
-   effective buttons each frame (see osd_getinput) and saves on request. Crank
-   Start is recorded as the UP token, matching the replay build's UP->Start
-   bridge (SMB never uses Up in 1-1). Kept in /Shared so it survives reinstalls
-   and is visible in data-disk mode; the replay build loads this exact path. */
+   effective buttons each frame (see osd_getinput) and saves on request. Kept
+   in /Shared so recordings survive reinstalls and are visible in data-disk
+   mode. Kirby needs real D-pad Up, so its crank Start uses the virtual MENU
+   token rather than Mario's historical UP bridge. */
+#ifdef PD_PLAYBENCH_RECORD_KIRBY
+#define REC_SCRIPT_PATH "/Shared/Emulation/nes/kirby_1_1.txt"
+#else
 #define REC_SCRIPT_PATH "/Shared/Emulation/nes/rec_script.txt"
+#endif
 
 void osd_rec_dump(void) {
     if (pd_playbench_record_save(REC_SCRIPT_PATH))
@@ -131,13 +135,25 @@ void osd_getinput(void) {
     }
     update_crank_buttons();
 
-    /* Record the effective buttons: crank Start becomes the UP token so the
-       replay build's UP->Start bridge reproduces it. */
+    /* Record the effective buttons. */
+#ifdef PD_PLAYBENCH_RECORD_KIRBY
+    int eff = 0;
+    if (current & kButtonLeft)  eff |= PD_BENCH_BUTTON_LEFT;
+    if (current & kButtonRight) eff |= PD_BENCH_BUTTON_RIGHT;
+    if (current & kButtonUp)    eff |= PD_BENCH_BUTTON_UP;
+    if (current & kButtonDown)  eff |= PD_BENCH_BUTTON_DOWN;
+    if (current & kButtonA)     eff |= PD_BENCH_BUTTON_A;
+    if (current & kButtonB)     eff |= PD_BENCH_BUTTON_B;
+    if (crank_start_down)
+        eff |= PD_BENCH_BUTTON_MENU; /* virtual NES Start */
+    pd_playbench_record_sample_mask(eff);
+#else
     PDButtons eff = current & (kButtonLeft | kButtonRight | kButtonUp |
                                kButtonDown | kButtonA | kButtonB);
     if (crank_start_down)
         eff |= kButtonUp;
     pd_playbench_record_sample(eff);
+#endif
 #elif defined(PD_PLAYBENCH_ENABLED)
     /* Benchmark build: scripted input replaces real input (deterministic replay).
        The Playdate has no Start/Select buttons -- we map those to the crank,
@@ -149,6 +165,9 @@ void osd_getinput(void) {
     pd->system->getButtonState(&current, NULL, NULL);
     pd_playbench_update();
     current = pd_playbench_get_buttons(current);
+#ifdef PD_PLAYBENCH_KIRBY
+    int script_buttons = pd_playbench_get_script_button_mask();
+#endif
 
     /* Frame telemetry so a script can be timed to on-screen events (e.g. the
        frame a pit is reached). Logs every 25 frames (~0.5s at 50fps). */
@@ -162,13 +181,26 @@ void osd_getinput(void) {
     prev = current;
 
     for (int i = 0; i < MAP_LEN; i++) {
+#ifndef PD_PLAYBENCH_KIRBY
         if (map[i].btn == kButtonUp)
             continue; /* remapped to Start below */
+#endif
         if (pushed   & map[i].btn) fire(map[i].evt, INP_STATE_MAKE);
         if (released & map[i].btn) fire(map[i].evt, INP_STATE_BREAK);
     }
+#ifdef PD_PLAYBENCH_KIRBY
+    static int prev_virtual = 0;
+    int virtual_pushed = script_buttons & ~prev_virtual;
+    int virtual_released = ~script_buttons & prev_virtual;
+    prev_virtual = script_buttons;
+    if (virtual_pushed & PD_BENCH_BUTTON_MENU)
+        fire(event_joypad1_start, INP_STATE_MAKE);
+    if (virtual_released & PD_BENCH_BUTTON_MENU)
+        fire(event_joypad1_start, INP_STATE_BREAK);
+#else
     if (pushed   & kButtonUp) fire(event_joypad1_start, INP_STATE_MAKE);
     if (released & kButtonUp) fire(event_joypad1_start, INP_STATE_BREAK);
+#endif
 #else
     PDButtons pushed, released;
     pd->system->getButtonState(NULL, &pushed, &released);

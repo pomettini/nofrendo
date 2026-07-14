@@ -67,7 +67,17 @@ endif()
 
 # pd-playbench: scripted-input benchmark harness, dev-only (never in release)
 option(PD_PLAYBENCH "Build the pd-playbench scripted-input replay/benchmark (dev only)" OFF)
+option(PD_PLAYBENCH_KIRBY "Replay the deterministic Kirby's Adventure 1-1 smoke test" OFF)
 option(PD_PLAYBENCH_RECORD "Build the pd-playbench recorder: capture a script from live play (dev only)" OFF)
+option(PD_PLAYBENCH_RECORD_KIRBY "Record Kirby via the ROM picker with distinct NES Start input" OFF)
+if (PD_PLAYBENCH_KIRBY)
+    set(PD_PLAYBENCH ON CACHE BOOL
+        "Build the pd-playbench scripted-input replay/benchmark (dev only)" FORCE)
+endif()
+if (PD_PLAYBENCH_RECORD_KIRBY)
+    set(PD_PLAYBENCH_RECORD ON CACHE BOOL
+        "Build the pd-playbench recorder: capture a script from live play (dev only)" FORCE)
+endif()
 # Both modes link the library; RECORD additionally selects record behaviour.
 if (PD_PLAYBENCH OR PD_PLAYBENCH_RECORD)
     list(APPEND PLATFORM_SOURCES third_party/pd-playbench/src/pd_playbench.c)
@@ -81,6 +91,7 @@ option(AUDIO_DIRECT_RING "Fill the Playdate audio ring directly instead of using
 option(PPU_BG      "Enable PPU background rendering (OFF to measure cost)" ON)
 option(PPU_SPRITES "Enable PPU sprite rendering (OFF to measure cost)" ON)
 option(PPU_BLIT    "Enable Playdate scanline blit (OFF to measure cost)" ON)
+option(PPU_BG_PAIR_FAST "Render the common no-latch background path two tiles at a time" OFF)
 option(PPU_FAST_STRIKE "Return sprite-zero hit as soon as it is detected" OFF)
 option(PPU_SPRITE_CACHE_DRAW_ONLY "Build the sprite render cache only on drawn frames" OFF)
 option(PPU_FAST_OAMDMA "Copy sprite DMA from mapped CPU memory without 256 helper calls" OFF)
@@ -154,10 +165,14 @@ set(GAME_DEFINES
     $<$<OR:$<BOOL:${PD_PLAYBENCH}>,$<BOOL:${PD_PLAYBENCH_RECORD}>>:PD_PLAYBENCH_ENABLED=1>
     $<$<OR:$<BOOL:${PD_PLAYBENCH}>,$<BOOL:${PD_PLAYBENCH_RECORD}>>:PD_PLAYBENCH_MAX_COMMANDS=1024>
     $<$<BOOL:${PD_PLAYBENCH_RECORD}>:PD_PLAYBENCH_RECORD=1>
+    $<$<BOOL:${PD_PLAYBENCH_KIRBY}>:PD_PLAYBENCH_KIRBY=1>
+    $<$<BOOL:${PD_PLAYBENCH_RECORD_KIRBY}>:PD_PLAYBENCH_RECORD_KIRBY=1>
+    $<$<OR:$<BOOL:${PD_PLAYBENCH_KIRBY}>,$<BOOL:${PD_PLAYBENCH_RECORD_KIRBY}>>:PD_PLAYBENCH_FRESH_SRAM=1>
     $<$<BOOL:${DIAG}>:BUILD_TIMESTAMP="${BUILD_TIMESTAMP}">
     $<$<NOT:$<BOOL:${PPU_BG}>>:DISABLE_PPU_BG=1>
     $<$<NOT:$<BOOL:${PPU_SPRITES}>>:DISABLE_PPU_SPRITES=1>
     $<$<NOT:$<BOOL:${PPU_BLIT}>>:DISABLE_PPU_BLIT=1>
+    $<$<BOOL:${PPU_BG_PAIR_FAST}>:PPU_BG_PAIR_FAST=1>
     $<$<BOOL:${PPU_FAST_STRIKE}>:PPU_FAST_STRIKE=1>
     $<$<BOOL:${PPU_SPRITE_CACHE_DRAW_ONLY}>:PPU_SPRITE_CACHE_DRAW_ONLY=1>
     $<$<BOOL:${PPU_FAST_OAMDMA}>:PPU_FAST_OAMDMA=1>
