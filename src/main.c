@@ -279,16 +279,16 @@ static void start_rom_picker(void) {
    a release (gated by the PD_PLAYBENCH / PD_PLAYBENCH_RECORD cmake options). */
 static char bench_rom_path[ROM_PICKER_MAX_PATH];
 static char bench_fallback_path[ROM_PICKER_MAX_PATH];
+#ifdef PD_PLAYBENCH_KIRBY
+static char bench_incompatible_rom_path[ROM_PICKER_MAX_PATH];
+#endif
 static int bench_rom_found;
 static int bench_fallback_found;
-
-static int bench_name_has_target(const char *s) {
-  const char *target =
 #ifdef PD_PLAYBENCH_KIRBY
-      "kirby";
-#else
-      "mario";
+static int bench_incompatible_rom_found;
 #endif
+
+static int bench_name_contains(const char *s, const char *target) {
   for (; *s; s++) {
     const char *a = s;
     const char *m = target;
@@ -303,6 +303,17 @@ static int bench_name_has_target(const char *s) {
       return 1;
   }
   return 0;
+}
+
+static int bench_name_has_target(const char *s) {
+#ifdef PD_PLAYBENCH_KIRBY
+  /* The committed input capture was recorded against the PAL/Europe release.
+     The USA Rev 1 title reaches menus on different emulated frames, so accepting
+     any Kirby filename silently produces a different workload. */
+  return bench_name_contains(s, "kirby") && bench_name_contains(s, "europe");
+#else
+  return bench_name_contains(s, "mario");
+#endif
 }
 
 static int bench_is_nes(const char *name) {
@@ -323,6 +334,14 @@ static void bench_scan_file(const char *filename, void *ud) {
              ROM_PICKER_FOLDER, filename);
     bench_fallback_found = 1;
   }
+#ifdef PD_PLAYBENCH_KIRBY
+  if (!bench_incompatible_rom_found && bench_name_contains(filename, "kirby") &&
+      !bench_name_contains(filename, "europe")) {
+    snprintf(bench_incompatible_rom_path, sizeof(bench_incompatible_rom_path),
+             "%s%s", ROM_PICKER_FOLDER, filename);
+    bench_incompatible_rom_found = 1;
+  }
+#endif
   if (!bench_rom_found && bench_name_has_target(filename)) {
     snprintf(bench_rom_path, sizeof(bench_rom_path), "%s%s", ROM_PICKER_FOLDER,
              filename);
@@ -335,6 +354,9 @@ static void bench_scan_file(const char *filename, void *ud) {
 static const char *bench_find_rom(void) {
   bench_rom_found = 0;
   bench_fallback_found = 0;
+#ifdef PD_PLAYBENCH_KIRBY
+  bench_incompatible_rom_found = 0;
+#endif
   pd->file->listfiles(ROM_PICKER_FOLDER, bench_scan_file, NULL, 0);
   return bench_rom_found ? bench_rom_path
 #ifndef PD_PLAYBENCH_KIRBY
@@ -356,7 +378,9 @@ static const char *bench_find_rom(void) {
 #define BUNDLED_SCRIPT_PATH "nes_kirby_adventure_1_1.txt"
 #define BENCH_TEST_NAME "nes_kirby_adventure_1_1"
 #define BENCH_ROM_NAME "Kirby's Adventure"
-#if defined(ENABLE_LTO) && defined(PPU_BG_PAIR_FAST) && defined(NES_IRQ_MAPPER_BATCH_IRQ_SCOPE)
+#if defined(ENABLE_LTO_NO_IPA_CLONE) && defined(PPU_BG_PAIR_FAST) && defined(NES_IRQ_MAPPER_BATCH_IRQ_SCOPE)
+#define BENCH_BUILD_LABEL "0.4-bench-kirby-lto-noclone"
+#elif defined(ENABLE_LTO) && defined(PPU_BG_PAIR_FAST) && defined(NES_IRQ_MAPPER_BATCH_IRQ_SCOPE)
 #define BENCH_BUILD_LABEL "0.4-bench-kirby-lto"
 #elif defined(DIAG_CPU_EXEC_TIMING) && defined(PPU_BG_PAIR_FAST) && defined(NES_IRQ_MAPPER_BATCH_IRQ_SCOPE)
 #define BENCH_BUILD_LABEL "0.4-bench-kirby-profile"
@@ -398,6 +422,15 @@ static const char *bench_build_script(void) {
 static void bench_run(void) {
   const char *path = bench_find_rom();
   if (!path) {
+#ifdef PD_PLAYBENCH_KIRBY
+    if (bench_incompatible_rom_found) {
+      pd->system->logToConsole(
+          "[bench] incompatible ROM %s; Kirby replay requires Europe release",
+          bench_incompatible_rom_path);
+      start_rom_picker();
+      return;
+    }
+#endif
     pd->system->logToConsole("[bench] no .nes ROM in %s; opening picker",
                              ROM_PICKER_FOLDER);
     start_rom_picker();

@@ -311,6 +311,84 @@ cross-file inlining while retaining whole-program simplification remains plausib
 its performance gate must be run on an F746 Rev A because H7 cache behavior cannot select
 between the two layouts.
 
+First F746 Rev-A attempt (`0.4-bench-kirby-irqpair`, 2026-07-19): **INVALID A/B,
+BUT CONFIRMS SEVERE HEADROOM PROBLEM.** It reported 66,380 ms total, 33.02 ms average,
+1,992 slow frames, and 30.28 estimated fps, but did not enter 1-1. Inspection of the data
+disk found `Kirby's Adventure (USA) (Rev 1).nes` (SHA-256
+`34afcebaf04d57a42c2436fb95b933c7841e1621f1dc3be482380baef33ec3d8`), whereas the
+recording was made with the Europe release used for all H7 rows. The override and bundled
+scripts were identical (SHA-256
+`5b6c1e76b4ca509890612c6d6899b89de174e8692004ead171da036008fa6d53`). The input engine
+advances once per emulated frame, so device speed is not the divergence source; the ROM
+variant is. Do not compare this row with H7 or use it to select LTO. The Kirby harness now
+requires a filename containing both `Kirby` and `Europe` and rejects the known wrong-region
+case. Re-run IRQ-pair on Rev A with the same Europe ROM before the LTO candidate.
+
+Corrected F746 Rev-A IRQ-pair baseline, using the same Europe ROM and exact replay as the
+H7 rows: **VALID, FAR BELOW BUDGET.** The replay entered 1-1 and completed exactly
+2,010/2,010 frames with no skips.
+
+| metric | H7 IRQ-pair | F746 IRQ-pair | F746 delta |
+|---|---:|---:|---:|
+| `elapsed_ms` | 40230 | 70937 | +30707 ms |
+| `avg_frame_ms` | 20.01 | 35.29 | **+15.28 ms / +76.4%** |
+| `worst_frame_ms` | 27.00 | 48.00 | +21.00 ms |
+| `slow_frames` | 826 | **1989** | +1163 |
+| `skipped_frames` | 0 | 0 | 0 |
+| `estimated_fps` | 49.96 | **28.34** | -21.62 |
+
+This validates the predicted Rev-A performance failure under an identical workload.
+Proceed with the already-scoped LTO A/B as the only changed build flag. Its F746 result,
+not the marginal H7 gain, decides whether to keep or reject it.
+
+F746 full-LTO result (`0.4-bench-kirby-lto`): **LARGE, REPEATABLE-SCALE WIN.** The exact
+replay again completed 2,010/2,010 frames with no skips.
+
+| metric | F746 IRQ-pair | F746 + LTO | LTO delta |
+|---|---:|---:|---:|
+| `elapsed_ms` | 70937 | **62798** | -8139 ms |
+| `avg_frame_ms` | 35.29 | **31.24** | **-4.05 ms / -11.5%** |
+| `worst_frame_ms` | 48.00 | **46.00** | -2.00 ms |
+| `slow_frames` | 1989 | **1972** | -17 |
+| `skipped_frames` | 0 | 0 | 0 |
+| `estimated_fps` | 28.34 | **32.01** | +3.67 |
+
+The F746 result decisively accepts LTO as an optimization, despite its marginal H7 row and
+larger image. It is still far from the 20 ms budget. One final compiler-layout A/B is
+justified: `ENABLE_LTO_NO_IPA_CLONE` keeps LTO but disables only GCC's interprocedural
+constant-propagation cloning. Test via `make install-bench-kirby-lto-noclone`; expected
+label `0.4-bench-kirby-lto-noclone`. Static inspection passed narrowly: `.text` fell from
+152,212 to 151,100 bytes and `pdex.bin` from 97,044 to 96,855 bytes. GCC still emitted the
+7,188-byte `nes_renderframe.constprop.0`, so this did not isolate that entire clone; it is
+only a 1,112-byte layout reduction. Keep it only if F746 timing is not worse than full LTO.
+
+F746 no-IPA-clone result: **REJECTED.** The exact replay completed with no skips, but the
+smaller image was materially slower than full LTO.
+
+| metric | Full LTO | LTO no-clone | No-clone delta |
+|---|---:|---:|---:|
+| `elapsed_ms` | 62798 | 65297 | +2499 ms |
+| `avg_frame_ms` | **31.24** | 32.49 | **+1.25 ms / +4.0%** |
+| `worst_frame_ms` | 46.00 | 47.00 | +1.00 ms |
+| `slow_frames` | 1972 | 1987 | +15 |
+| `estimated_fps` | **32.01** | 30.78 | -1.23 |
+
+The modest 1,112-byte text reduction does not compensate for the lost cloning. Leave
+`ENABLE_LTO_NO_IPA_CLONE` default OFF and do not promote it. Full LTO is the accepted
+compiler configuration for Rev A, pending the final visual confirmation and broader
+release soak; no further compiler-size variation is justified.
+
+PAL visual gate: **PASSED.** The tester reported no noticeable graphical glitches in the
+Europe/PAL replay for full LTO. The USA/NTSC ROM showed minor visual glitches, but NTSC is
+outside the current 50 Hz PAL promotion scope and remains a separate correctness item.
+
+**Promoted to the normal 0.4 build:** `NES_IRQ_MAPPER_BATCH_IRQ_SCOPE=ON` (fixes the MMC3
+window glitches), `PPU_BG_PAIR_FAST=ON` (validated renderer win), and `ENABLE_LTO=ON`
+(11.5% lower frame time on F746 in the PAL Kirby replay). Historical Kirby A/B targets
+explicitly override these promoted flags so their old single-variable configurations stay
+reproducible. The release still needs broader PAL ROM soak testing; the accepted result is
+32.01 fps in this worst-case Rev-A replay, not full 50 fps.
+
 ---
 
 ## Rev B is a different CPU (STM32H7) — measured 2026-07-09

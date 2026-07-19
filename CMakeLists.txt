@@ -85,6 +85,10 @@ endif()
 
 option(DIAG        "Enable performance diagnostics (logToConsole every 60 frames)" OFF)
 option(ENABLE_LTO  "Enable link-time optimization for the device build" OFF)
+option(ENABLE_LTO_NO_IPA_CLONE "Enable LTO without interprocedural constant-propagation cloning" OFF)
+if (ENABLE_LTO_NO_IPA_CLONE)
+    set(ENABLE_LTO ON CACHE BOOL "Enable link-time optimization for the device build" FORCE)
+endif()
 option(DIAG_DRAW_FPS "Draw Playdate's on-screen FPS HUD in diagnostic builds" OFF)
 option(DIAG_FPS_ONLY "Log only FPS windows without per-frame render timing" OFF)
 option(AUDIO       "Enable NES APU" OFF)
@@ -163,6 +167,7 @@ set(GAME_DEFINES
     $<$<AND:$<BOOL:${AUDIO}>,$<BOOL:${AUDIO_DIRECT_RING}>>:AUDIO_DIRECT_RING=1>
     $<$<BOOL:${DIAG}>:DIAG=1>
     $<$<BOOL:${ENABLE_LTO}>:ENABLE_LTO=1>
+    $<$<BOOL:${ENABLE_LTO_NO_IPA_CLONE}>:ENABLE_LTO_NO_IPA_CLONE=1>
     $<$<BOOL:${DIAG_DRAW_FPS}>:DIAG_DRAW_FPS=1>
     $<$<BOOL:${DIAG_FPS_ONLY}>:DIAG_FPS_ONLY=1>
     $<$<OR:$<BOOL:${PD_PLAYBENCH}>,$<BOOL:${PD_PLAYBENCH_RECORD}>>:PD_PLAYBENCH_ENABLED=1>
@@ -257,6 +262,11 @@ if (TOOLCHAIN STREQUAL "armgcc")
     if (ENABLE_LTO)
         target_compile_options(${PLAYDATE_GAME_DEVICE} PRIVATE -flto)
         target_link_options(${PLAYDATE_GAME_DEVICE} PRIVATE -flto)
+        if (ENABLE_LTO_NO_IPA_CLONE)
+            # Limit one source of interprocedural code growth while retaining
+            # whole-program analysis and dead-code removal.
+            target_compile_options(${PLAYDATE_GAME_DEVICE} PRIVATE -fno-ipa-cp-clone)
+        endif()
         # Keep the SDK allocator bridge as a concrete object. GCC 9's LTO
         # plugin otherwise internalizes its newlib `_realloc_r` definition
         # before archive resolution and the final link cannot satisfy libc.

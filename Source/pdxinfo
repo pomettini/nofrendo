@@ -3,5 +3,5 @@ author=Pomettini & nwagyu
 description=NES emulator
 bundleID=com.pomettini.nofrendo
 version=0.4
-buildNumber=2
+buildNumber=3
 imagePath=SystemAssets/
