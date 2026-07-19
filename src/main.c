@@ -278,15 +278,9 @@ static void start_rom_picker(void) {
 /* Dev-only benchmark/record harness: auto-load the Mario ROM. Never built into
    a release (gated by the PD_PLAYBENCH / PD_PLAYBENCH_RECORD cmake options). */
 static char bench_rom_path[ROM_PICKER_MAX_PATH];
-static char bench_fallback_path[ROM_PICKER_MAX_PATH];
-#ifdef PD_PLAYBENCH_KIRBY
 static char bench_incompatible_rom_path[ROM_PICKER_MAX_PATH];
-#endif
 static int bench_rom_found;
-static int bench_fallback_found;
-#ifdef PD_PLAYBENCH_KIRBY
 static int bench_incompatible_rom_found;
-#endif
 
 static int bench_name_contains(const char *s, const char *target) {
   for (; *s; s++) {
@@ -312,7 +306,9 @@ static int bench_name_has_target(const char *s) {
      any Kirby filename silently produces a different workload. */
   return bench_name_contains(s, "kirby") && bench_name_contains(s, "europe");
 #else
-  return bench_name_contains(s, "mario");
+  /* The Mario capture is a PAL replay too; another region is not an exact
+     correctness or performance comparison. */
+  return bench_name_contains(s, "mario") && bench_name_contains(s, "europe");
 #endif
 }
 
@@ -329,19 +325,17 @@ static void bench_scan_file(const char *filename, void *ud) {
   (void)ud;
   if (!bench_is_nes(filename))
     return;
-  if (!bench_fallback_found) {
-    snprintf(bench_fallback_path, sizeof(bench_fallback_path), "%s%s",
-             ROM_PICKER_FOLDER, filename);
-    bench_fallback_found = 1;
-  }
 #ifdef PD_PLAYBENCH_KIRBY
   if (!bench_incompatible_rom_found && bench_name_contains(filename, "kirby") &&
       !bench_name_contains(filename, "europe")) {
+#else
+  if (!bench_incompatible_rom_found && bench_name_contains(filename, "mario") &&
+      !bench_name_contains(filename, "europe")) {
+#endif
     snprintf(bench_incompatible_rom_path, sizeof(bench_incompatible_rom_path),
              "%s%s", ROM_PICKER_FOLDER, filename);
     bench_incompatible_rom_found = 1;
   }
-#endif
   if (!bench_rom_found && bench_name_has_target(filename)) {
     snprintf(bench_rom_path, sizeof(bench_rom_path), "%s%s", ROM_PICKER_FOLDER,
              filename);
@@ -349,20 +343,12 @@ static void bench_scan_file(const char *filename, void *ud) {
   }
 }
 
-/* Find the requested benchmark ROM in the games folder. Mario retains the
-   historical first-ROM fallback; Kirby refuses to run against the wrong ROM. */
+/* Find only the PAL ROM against which the committed input replay was recorded. */
 static const char *bench_find_rom(void) {
   bench_rom_found = 0;
-  bench_fallback_found = 0;
-#ifdef PD_PLAYBENCH_KIRBY
   bench_incompatible_rom_found = 0;
-#endif
   pd->file->listfiles(ROM_PICKER_FOLDER, bench_scan_file, NULL, 0);
-  return bench_rom_found ? bench_rom_path
-#ifndef PD_PLAYBENCH_KIRBY
-         : bench_fallback_found ? bench_fallback_path
-#endif
-                           : NULL;
+  return bench_rom_found ? bench_rom_path : NULL;
 }
 #endif /* shared benchmark/record harness */
 
@@ -410,7 +396,9 @@ static const char *bench_find_rom(void) {
 #define BUNDLED_SCRIPT_PATH "nes_smb1_world_1_1.txt"
 #define BENCH_TEST_NAME "nes_smb1_world_1_1"
 #define BENCH_ROM_NAME "Super Mario Bros"
-#ifdef PPU_BG_PAIR_FAST
+#if defined(NES6502_ZP_BEQ_SPIN) && defined(NES6502_LINKED_CORE) && defined(ENABLE_LTO)
+#define BENCH_BUILD_LABEL "0.4-bench-prod-zpspin"
+#elif defined(PPU_BG_PAIR_FAST)
 #define BENCH_BUILD_LABEL "0.4-bench-bgpair"
 #else
 #define BENCH_BUILD_LABEL "0.4-bench"
@@ -432,15 +420,13 @@ static const char *bench_build_script(void) {
 static void bench_run(void) {
   const char *path = bench_find_rom();
   if (!path) {
-#ifdef PD_PLAYBENCH_KIRBY
     if (bench_incompatible_rom_found) {
       pd->system->logToConsole(
-          "[bench] incompatible ROM %s; Kirby replay requires Europe release",
+          "[bench] incompatible ROM %s; replay requires Europe release",
           bench_incompatible_rom_path);
       start_rom_picker();
       return;
     }
-#endif
     pd->system->logToConsole("[bench] no .nes ROM in %s; opening picker",
                              ROM_PICKER_FOLDER);
     start_rom_picker();

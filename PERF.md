@@ -175,6 +175,30 @@ effect of removing millions of redundant polling iterations. Promote
 and generic-chain targets explicitly keep it off so their original A/B rows remain
 reproducible.
 
+### Promoted-stack PAL regression — 2026-07-20
+
+The deterministic Super Mario Bros. Europe replay was rerun on Rev A with the complete
+promoted stack, including linked-core execution and the zero-page polling fast-forward.
+The harness now requires a Europe filename for Mario as well as Kirby and no longer falls
+back to an arbitrary first ROM, preventing a wrong-region or wrong-game result from being
+mistaken for a valid PAL row. Report label: `0.4-bench-prod-zpspin`.
+
+| metric | Rev-A Mario PAL |
+|---|---:|
+| `total_frames` / `measured_frames` | 2879 / 2879 |
+| `elapsed_ms` | 64459 |
+| `avg_frame_ms` | **22.39** |
+| `best_frame_ms` | 1.00 |
+| `worst_frame_ms` | 31.00 |
+| `slow_frames` | 2309 |
+| `skipped_frames` | 0 |
+| `estimated_fps` | **44.66** |
+
+The tester confirmed no graphical glitches. Together with Kirby's exact, glitch-free
+2,010-frame MMC3 replay, the promoted optimization now passes deterministic PAL coverage
+on two distinct game/mapper workloads. Mario remains below the 50 FPS target on Rev A,
+but is materially lighter than Kirby's 29.23 ms / 34.21 FPS worst-case path.
+
 ---
 
 ## Two-tile background renderer probe — 2026-07-14
