@@ -178,6 +178,91 @@
       mem_writebyte(address, value); \
 }
 
+/* Common loop superinstruction. The first instruction has already committed
+** its cycles before this runs, so only fuse when the ordinary outer loop would
+** execute another opcode. Interrupts are observed between execute slices, not
+** between opcodes, making this timing-equivalent to the two switch iterations. */
+#if defined(NES6502_FUSE_INCDEC_BNE) && defined(NES6502_PC_PTR) && defined(NES6502_SWITCH)
+#define TRY_FUSE_BNE() \
+{ \
+   if (__builtin_expect(remaining_cycles > 0, 1)) \
+   { \
+      if (__builtin_expect(pc_ptr >= pc_bank_end, 0)) PC_REBASE(); \
+      if (__builtin_expect(*pc_ptr == 0xD0, 1)) \
+      { \
+         PC_SKIP_1(); \
+         PROFILE_OPCODE(0xD0); \
+         PROFILE_PAIR(0xD0); \
+         PROFILE_PRG_PAGE(PC); \
+         goto fused_bne; \
+      } \
+   } \
+}
+#else
+#define TRY_FUSE_BNE()
+#endif
+
+/* Profile-directed hot chain. F0->A5 and A5->F0 make up 46.7% of Kirby's
+** measured opcode transitions. Each case checks the ordinary loop's cycle
+** condition before consuming the next opcode, so slice boundaries stay exact. */
+#if defined(NES6502_CHAIN_F0_A5) && defined(NES6502_PC_PTR) && defined(NES6502_SWITCH)
+#define TRY_CHAIN_OPCODE(expected, target) \
+{ \
+   if (__builtin_expect(remaining_cycles > 0, 1)) \
+   { \
+      if (__builtin_expect(pc_ptr >= pc_bank_end, 0)) PC_REBASE(); \
+      if (__builtin_expect(*pc_ptr == (expected), 1)) \
+      { \
+         PC_SKIP_1(); \
+         PROFILE_OPCODE(expected); \
+         PROFILE_PAIR(expected); \
+         PROFILE_PRG_PAGE(PC); \
+         goto target; \
+      } \
+   } \
+}
+#define TRY_CHAIN_A5() TRY_CHAIN_OPCODE(0xA5, chained_a5)
+#define TRY_CHAIN_F0() TRY_CHAIN_OPCODE(0xF0, chained_f0)
+#else
+#define TRY_CHAIN_A5()
+#define TRY_CHAIN_F0()
+#endif
+
+/* A zero-page byte cannot change while the CPU is executing only this polling
+** loop. Collapse repeated "LDA zp; BEQ -4" iterations to the exact end of the
+** current execute slice, where this core already observes NMI/IRQ changes.
+** Preserve both the ordinary instruction overshoot and the terminal PC. */
+#if defined(NES6502_ZP_BEQ_SPIN) && defined(NES6502_PC_PTR) && defined(NES6502_SWITCH)
+#define TRY_ZP_BEQ_SPIN() \
+{ \
+   if (__builtin_expect(remaining_cycles > 0 && z_flag == 0, 0) \
+       && __builtin_expect((pc_bank_end - pc_ptr) >= 2, 1) \
+       && pc_ptr[0] == 0xF0 && pc_ptr[1] == 0xFC) \
+   { \
+      uint32 _spin_target = (PC - 2) & 0xFFFF; \
+      uint32 _spin_after_branch = (PC + 2) & 0xFFFF; \
+      int _spin_branch_cycles = \
+          ((_spin_target ^ _spin_after_branch) & 0xFF00) ? 4 : 3; \
+      int _spin_pair_cycles = _spin_branch_cycles + 3; \
+      int _spin_pairs = (remaining_cycles - 1) / _spin_pair_cycles; \
+      if (_spin_pairs > 0) \
+         ADD_CYCLES(_spin_pairs * _spin_pair_cycles); \
+      ADD_CYCLES(_spin_branch_cycles); \
+      PC = _spin_target; \
+      pc_ptr -= 2; \
+      if (remaining_cycles > 0) \
+      { \
+         PC_SKIP_2(); \
+         A = ZP_READBYTE(baddr); \
+         SET_NZ_FLAGS(A); \
+         ADD_CYCLES(3); \
+      } \
+   } \
+}
+#else
+#define TRY_ZP_BEQ_SPIN()
+#endif
+
 #if defined(NES6502_HOTOPS) || defined(NES6502_FAST_BRANCHES) || defined(NES6502_FAST_BNE) || defined(NES6502_FAST_BPL) || defined(NES6502_FAST_BEQ)
 #define FAST_RELATIVE_BRANCH(condition) \
 { \
@@ -1718,6 +1803,91 @@ void nes6502_opcode_profile_snapshot(uint32 counts[256], uint32 *total)
 #define PROFILE_OPCODE(opcode)  ((void) 0)
 #endif
 
+#ifdef NES6502_PAIRPROFILE
+#define PAIR_PROFILE_SIZE 4096u
+#define PAIR_PROFILE_MASK (PAIR_PROFILE_SIZE - 1u)
+#define PAIR_PROFILE_MAX_PROBES 16u
+static uint32 pair_profile_keys[PAIR_PROFILE_SIZE]; /* opcode pair + 1; zero = empty */
+static uint32 pair_profile_counts[PAIR_PROFILE_SIZE];
+static uint32 pair_profile_total;
+static uint32 pair_profile_dropped;
+static uint8 pair_profile_previous;
+static uint8 pair_profile_has_previous;
+
+static void nes6502_pair_profile_add(uint8 opcode)
+{
+   if (pair_profile_has_previous)
+   {
+      uint32 pair = ((uint32) pair_profile_previous << 8) | opcode;
+      uint32 key = pair + 1u;
+      uint32 slot = (pair * 2654435761u) >> 20;
+      uint32 probes;
+
+      pair_profile_total++;
+      for (probes = 0; probes < PAIR_PROFILE_MAX_PROBES; probes++)
+      {
+         if (pair_profile_keys[slot] == key)
+         {
+            pair_profile_counts[slot]++;
+            break;
+         }
+         if (pair_profile_keys[slot] == 0)
+         {
+            pair_profile_keys[slot] = key;
+            pair_profile_counts[slot] = 1;
+            break;
+         }
+         slot = (slot + 1u) & PAIR_PROFILE_MASK;
+      }
+      if (probes == PAIR_PROFILE_MAX_PROBES)
+         pair_profile_dropped++;
+   }
+   pair_profile_previous = opcode;
+   pair_profile_has_previous = 1;
+}
+
+#define PROFILE_PAIR(opcode) nes6502_pair_profile_add((uint8) (opcode))
+
+void nes6502_pair_profile_reset(void)
+{
+   memset(pair_profile_keys, 0, sizeof(pair_profile_keys));
+   memset(pair_profile_counts, 0, sizeof(pair_profile_counts));
+   pair_profile_total = 0;
+   pair_profile_dropped = 0;
+   pair_profile_has_previous = 0;
+}
+
+void nes6502_pair_profile_snapshot_top(
+    uint16 pairs[NES6502_PAIRPROFILE_TOP],
+    uint32 counts[NES6502_PAIRPROFILE_TOP], uint32 *total, uint32 *dropped)
+{
+   uint32 i;
+   memset(pairs, 0, sizeof(uint16) * NES6502_PAIRPROFILE_TOP);
+   memset(counts, 0, sizeof(uint32) * NES6502_PAIRPROFILE_TOP);
+
+   for (i = 0; i < PAIR_PROFILE_SIZE; i++)
+   {
+      uint32 count = pair_profile_counts[i];
+      uint32 pos;
+      if (count <= counts[NES6502_PAIRPROFILE_TOP - 1])
+         continue;
+      pos = NES6502_PAIRPROFILE_TOP - 1;
+      while (pos > 0 && count > counts[pos - 1])
+      {
+         counts[pos] = counts[pos - 1];
+         pairs[pos] = pairs[pos - 1];
+         pos--;
+      }
+      counts[pos] = count;
+      pairs[pos] = (uint16) (pair_profile_keys[i] - 1u);
+   }
+   if (total) *total = pair_profile_total;
+   if (dropped) *dropped = pair_profile_dropped;
+}
+#else
+#define PROFILE_PAIR(opcode) ((void) 0)
+#endif
+
 #ifdef NES6502_PRGPROFILE
 /* Per-4KB-page execution histogram: counts instructions dispatched from each
    mem_page index (0-15). Pages 8-15 are PRG ROM ($8000-$FFFF). Tells us whether
@@ -2431,6 +2601,7 @@ static int nes6502_tcmhot_execute(int timeslice_cycles)
    _op = *pc_ptr++; \
    PC++; \
    PROFILE_OPCODE(_op); \
+   PROFILE_PAIR(_op); \
    goto *opcode_table[_op]; \
 }
 #else
@@ -2438,6 +2609,7 @@ static int nes6502_tcmhot_execute(int timeslice_cycles)
 { \
    uint8 _op = bank_readbyte(PC++); \
    PROFILE_OPCODE(_op); \
+   PROFILE_PAIR(_op); \
    goto *opcode_table[_op]; \
 }
 #endif
@@ -2618,6 +2790,7 @@ int nes6502_execute(int timeslice_cycles)
          _op = *pc_ptr++;
          PC++;
          PROFILE_OPCODE(_op);
+         PROFILE_PAIR(_op);
          PROFILE_PRG_PAGE(PC);
          switch (_op)
          {
@@ -2646,6 +2819,9 @@ int nes6502_execute(int timeslice_cycles)
          OPCODE_END
 
       OPCODE_BEGIN(D0)  /* BNE $nnnn */
+#ifdef NES6502_FUSE_INCDEC_BNE
+fused_bne:
+#endif
 #ifdef NES6502_HOTOPS
          FAST_RELATIVE_BRANCH(0 != z_flag);
 #else
@@ -2654,11 +2830,15 @@ int nes6502_execute(int timeslice_cycles)
          OPCODE_END
 
       OPCODE_BEGIN(F0)  /* BEQ $nnnn */
+#ifdef NES6502_CHAIN_F0_A5
+chained_f0:
+#endif
 #ifdef NES6502_HOTOPS
          FAST_RELATIVE_BRANCH(0 == z_flag);
 #else
          BEQ();
 #endif
+         TRY_CHAIN_A5();
          OPCODE_END
 
       OPCODE_BEGIN(10)  /* BPL $nnnn */
@@ -2680,6 +2860,9 @@ int nes6502_execute(int timeslice_cycles)
          OPCODE_END
 
       OPCODE_BEGIN(A5)  /* LDA $nn */
+#ifdef NES6502_CHAIN_F0_A5
+chained_a5:
+#endif
 #if defined(NES6502_HOTOPS) || defined(NES6502_FAST_MEMOPS)
          FETCH_PC_BYTE_DIRECT(baddr);
          A = ZP_READBYTE(baddr);
@@ -2688,10 +2871,13 @@ int nes6502_execute(int timeslice_cycles)
 #else
          LDA(3, ZERO_PAGE_BYTE);
 #endif
+         TRY_ZP_BEQ_SPIN();
+         TRY_CHAIN_F0();
          OPCODE_END
 
       OPCODE_BEGIN(C8)  /* INY */
          INY();
+         TRY_FUSE_BNE();
          OPCODE_END
 
       OPCODE_BEGIN(C9)  /* CMP #$nn */
@@ -3299,6 +3485,7 @@ int nes6502_execute(int timeslice_cycles)
 
       OPCODE_BEGIN(88)  /* DEY */
          DEY();
+         TRY_FUSE_BNE();
          OPCODE_END
 
       OPCODE_BEGIN(8A)  /* TXA */
@@ -3424,6 +3611,9 @@ int nes6502_execute(int timeslice_cycles)
 
 #ifndef NES6502_HOT_CLUSTER
       OPCODE_BEGIN(A5)  /* LDA $nn */
+#ifdef NES6502_CHAIN_F0_A5
+chained_a5:
+#endif
 #if defined(NES6502_HOTOPS) || defined(NES6502_FAST_MEMOPS)
          FETCH_PC_BYTE_DIRECT(baddr);
          A = ZP_READBYTE(baddr);
@@ -3432,6 +3622,8 @@ int nes6502_execute(int timeslice_cycles)
 #else
          LDA(3, ZERO_PAGE_BYTE);
 #endif
+         TRY_ZP_BEQ_SPIN();
+         TRY_CHAIN_F0();
          OPCODE_END
 #endif /* !NES6502_HOT_CLUSTER */
 
@@ -3588,6 +3780,7 @@ int nes6502_execute(int timeslice_cycles)
 #ifndef NES6502_HOT_CLUSTER
       OPCODE_BEGIN(C8)  /* INY */
          INY();
+         TRY_FUSE_BNE();
          OPCODE_END
 #endif /* !NES6502_HOT_CLUSTER */
 
@@ -3605,6 +3798,7 @@ int nes6502_execute(int timeslice_cycles)
 
       OPCODE_BEGIN(CA)  /* DEX */
          DEX();
+         TRY_FUSE_BNE();
          OPCODE_END
 
       OPCODE_BEGIN(CB)  /* SBX #$nn */
@@ -3629,6 +3823,9 @@ int nes6502_execute(int timeslice_cycles)
 
 #ifndef NES6502_HOT_CLUSTER
       OPCODE_BEGIN(D0)  /* BNE $nnnn */
+#ifdef NES6502_FUSE_INCDEC_BNE
+fused_bne:
+#endif
 #ifdef NES6502_HOTOPS
          FAST_RELATIVE_BRANCH(0 != z_flag);
 #else
@@ -3711,6 +3908,7 @@ int nes6502_execute(int timeslice_cycles)
 
       OPCODE_BEGIN(E8)  /* INX */
          INX();
+         TRY_FUSE_BNE();
          OPCODE_END
 
       OPCODE_BEGIN(E9)  /* SBC #$nn */
@@ -3740,11 +3938,15 @@ int nes6502_execute(int timeslice_cycles)
 
 #ifndef NES6502_HOT_CLUSTER
       OPCODE_BEGIN(F0)  /* BEQ $nnnn */
+#ifdef NES6502_CHAIN_F0_A5
+chained_f0:
+#endif
 #ifdef NES6502_HOTOPS
          FAST_RELATIVE_BRANCH(0 == z_flag);
 #else
          BEQ();
 #endif
+         TRY_CHAIN_A5();
          OPCODE_END
 #endif /* !NES6502_HOT_CLUSTER */
 

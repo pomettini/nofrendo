@@ -378,7 +378,17 @@ static const char *bench_find_rom(void) {
 #define BUNDLED_SCRIPT_PATH "nes_kirby_adventure_1_1.txt"
 #define BENCH_TEST_NAME "nes_kirby_adventure_1_1"
 #define BENCH_ROM_NAME "Kirby's Adventure"
-#if defined(ENABLE_LTO_NO_IPA_CLONE) && defined(PPU_BG_PAIR_FAST) && defined(NES_IRQ_MAPPER_BATCH_IRQ_SCOPE)
+#if defined(NES6502_PAIRPROFILE) && defined(NES6502_LINKED_CORE) && defined(ENABLE_LTO)
+#define BENCH_BUILD_LABEL "0.4-bench-kirby-pairprof"
+#elif defined(NES6502_ZP_BEQ_SPIN) && defined(NES6502_LINKED_CORE) && defined(ENABLE_LTO)
+#define BENCH_BUILD_LABEL "0.4-bench-kirby-lto-linked-zpspin"
+#elif defined(NES6502_CHAIN_F0_A5) && defined(NES6502_LINKED_CORE) && defined(ENABLE_LTO)
+#define BENCH_BUILD_LABEL "0.4-bench-kirby-lto-linked-f0a5"
+#elif defined(NES6502_FUSE_INCDEC_BNE) && defined(NES6502_LINKED_CORE) && defined(ENABLE_LTO)
+#define BENCH_BUILD_LABEL "0.4-bench-kirby-lto-linked-fuse"
+#elif defined(NES6502_LINKED_CORE) && defined(ENABLE_LTO) && defined(PPU_BG_PAIR_FAST) && defined(NES_IRQ_MAPPER_BATCH_IRQ_SCOPE)
+#define BENCH_BUILD_LABEL "0.4-bench-kirby-lto-linked"
+#elif defined(ENABLE_LTO_NO_IPA_CLONE) && defined(PPU_BG_PAIR_FAST) && defined(NES_IRQ_MAPPER_BATCH_IRQ_SCOPE)
 #define BENCH_BUILD_LABEL "0.4-bench-kirby-lto-noclone"
 #elif defined(ENABLE_LTO) && defined(PPU_BG_PAIR_FAST) && defined(NES_IRQ_MAPPER_BATCH_IRQ_SCOPE)
 #define BENCH_BUILD_LABEL "0.4-bench-kirby-lto"
@@ -477,6 +487,9 @@ static void bench_run(void) {
     return;
 #endif
   }
+#ifdef NES6502_PAIRPROFILE
+  nes6502_pair_profile_reset();
+#endif
   pd_playbench_start();
   pd->system->logToConsole("[bench] script started: %s", cfg.test_name);
 }
@@ -541,9 +554,11 @@ int eventHandler(PlaydateAPI *playdate, PDSystemEvent event, uint32_t arg) {
     pd = playdate;
     pd->display->setRefreshRate(60.0f);
     osd_load_settings(); /* restore saved Frameskip / Show FPS preferences */
+#ifndef NES6502_LINKED_CORE
     nes6502_itcm_init(
         pd->system
             ->realloc); /* copy execute loop to ITCM before any NES init */
+#endif
 #ifdef NES6502_TCMHOT_CORE
     nes6502_tcmhot_core_init(pd->system->clearICache);
     log_tcmhot_core_status();

@@ -50,6 +50,131 @@ the mandatory hard-fault gate, the dynarec is **not viable**: stop here and do n
 translator. The failed probe implementation and build target were reverted; this result
 remains logged so the privileged cache-maintenance experiment is not repeated.
 
+### Rev-A linked-core memory-placement probe — 2026-07-19
+
+The first structural follow-up keeps the exact accepted PAL Kirby stack and full LTO, but
+executes the linker's already-contiguous `.itcm` section in place instead of copying the
+complete 6502 interpreter to a second heap-SRAM allocation at launch. This is deliberately
+smaller than another partial interpreter or decoded cache: both previously increased the
+hot-path working set or paid fallback overhead, while the copied full core is active in every
+frame and has never been isolated on Rev A.
+
+Build flag: `NES6502_LINKED_CORE`, default **OFF**. Candidate command:
+`make install-bench-kirby-lto-linked`; report label:
+`0.4-bench-kirby-lto-linked`. The control is the repeatable Rev-A full-LTO row
+(`avg_frame_ms=31.25`, `elapsed_ms=62811-62819`, `estimated_fps=32.00`). Keep only if the
+2,010-frame PAL replay remains visually correct and improves outside that narrow run-to-run
+band; otherwise reject and restore the heap-relocated core.
+
+First Rev-A device result: **ACCEPTED — MATERIAL SPEEDUP.** The deterministic PAL
+replay completed all 2,010 frames with no skips and stayed synchronized. Compared with the
+repeatable full-LTO control:
+
+| metric | heap-relocated LTO | linked core | delta |
+|---|---:|---:|---:|
+| `elapsed_ms` | 62819 | **59484** | **-3335 ms (-5.3%)** |
+| `avg_frame_ms` | 31.25 | **29.59** | **-1.66 ms (-5.3%)** |
+| `worst_frame_ms` | 46.00 | **43.00** | -3.00 ms |
+| `slow_frames` | 1976 | **1916** | -60 |
+| `skipped_frames` | 0 | 0 | 0 |
+| `estimated_fps` | 32.00 | **33.79** | **+1.79 (+5.6%)** |
+
+This is well outside the 8 ms elapsed spread of the two control repeats. It establishes that
+running the linked core is materially cheaper on Rev A than executing its heap-SRAM copy.
+The tester confirmed there were no PAL graphical glitches. `NES6502_LINKED_CORE=ON` is now
+promoted into `FAST_FLAGS`; the heap-relocated path remains available as the explicit
+default-off control inherited from `BASE_FLAGS`.
+
+### Inc/dec + BNE superinstruction probe — 2026-07-19
+
+The next structural probe attacks interpreter dispatch without adding a decoded-data cache.
+When `DEY`, `INY`, `DEX`, or `INX` is immediately followed by `BNE`, the first opcode peeks
+and consumes the `BNE` and jumps to its existing shared case body. The second opcode is fused
+only if the first instruction leaves a positive cycle budget—the exact condition under which
+the ordinary switch loop would execute it—so cycle overshoot and IRQ-slice boundaries remain
+unchanged. Bank-boundary rebasing and optional profiling attribution are preserved.
+
+Build flag: `NES6502_FUSE_INCDEC_BNE`, default **OFF**. Candidate command:
+`make install-bench-kirby-lto-fuse`; report label:
+`0.4-bench-kirby-lto-linked-fuse`. Compare with the accepted linked-core baseline
+(`avg_frame_ms=29.59`, `elapsed_ms=59484`, `estimated_fps=33.79`). Keep only with a complete,
+glitch-free PAL replay and a timing improvement beyond ordinary run noise.
+
+Rev-A result: **REJECTED — SMALL REGRESSION.** The full replay remained synchronized and
+the tester confirmed no graphical glitches, but average throughput moved the wrong way:
+
+| metric | linked core | pair fusion | delta |
+|---|---:|---:|---:|
+| `elapsed_ms` | 59484 | 60040 | +556 ms (+0.9%) |
+| `avg_frame_ms` | 29.59 | 29.87 | +0.28 ms (+0.9%) |
+| `worst_frame_ms` | 43.00 | **42.00** | -1.00 ms |
+| `slow_frames` | 1916 | 1925 | +9 |
+| `estimated_fps` | 33.79 | 33.48 | -0.31 |
+
+Leave `NES6502_FUSE_INCDEC_BNE` off. The likely issue is that unconditional look-ahead on
+four opcodes costs more than the actual fused pairs save. Before attempting another
+superinstruction, `NES6502_PAIRPROFILE` now records exact executed opcode transitions in a
+diagnostic-only 4,096-entry hash table and prints the top 16 as two `[pairprof]` lines after
+the report. Run `make install-bench-kirby-pairprof`; ignore its wall-clock performance because
+the counter update intentionally perturbs every instruction. The report label is
+`0.4-bench-kirby-pairprof`.
+
+Pair-profile result (Rev A, exact PAL replay): 18,730,771 transitions, `dropped=0`, so the
+4,096-entry table captured the complete transition set. The timing result (52.19 ms) is
+instrumentation-only. The top transitions were:
+
+| pair | 6502 meaning | count | share |
+|---|---|---:|---:|
+| `F0 A5` | `BEQ` -> `LDA zp` | 4,383,283 | 23.4% |
+| `A5 F0` | `LDA zp` -> `BEQ` | 4,369,808 | 23.3% |
+| `C8 C8` | `INY` -> `INY` | 362,012 | 1.9% |
+| `C8 D0` | `INY` -> `BNE` | 128,666 | 0.7% |
+
+This explains the rejected inc/dec+BNE probe: its main pair covered less than one percent,
+whereas the alternating `F0/A5` chain alone covers **46.7%** of all executed transitions.
+The profile-directed candidate `NES6502_CHAIN_F0_A5` chains the existing BEQ and LDA-zp
+case bodies after the same per-instruction cycle-budget check used by the outer interpreter
+loop. It handles taken and not-taken BEQ paths because it tests the next opcode only after
+BEQ has established the correct PC. No decoded cache or alternate opcode implementation is
+introduced. Candidate command: `make install-bench-kirby-lto-f0a5`; report label:
+`0.4-bench-kirby-lto-linked-f0a5`.
+
+Rev A result: **30.19 ms average, 33.12 FPS, 1922 slow frames**. This is 0.60 ms
+(2.0%) slower than the 29.59 ms linked-core baseline, so the generic chain is rejected and
+remains default-off. Pair frequency alone did not compensate for the extra next-opcode test,
+bounds check, and larger hot case bodies; a future specialization must first identify the
+specific PCs responsible for the pair instead of taxing every `F0` and `A5` execution.
+
+ROM inspection then identified the structural opportunity behind the profile. The PAL ROM
+contains exactly one `A5 xx F0 FC` sequence: `A5 39 F0 FC` at CPU `$C070`, or
+`LDA $39; BEQ $C070`. This stable zero-page polling loop explains nearly half of all measured
+opcode transitions. `NES6502_ZP_BEQ_SPIN` recognizes the generic four-byte loop after its
+first `LDA`; while the loaded value is zero, it collapses repeated iterations to the same
+`nes6502_execute()` slice boundary where NMI/IRQ changes are already observed. It preserves
+the taken-branch page-cross cost, normal final-instruction cycle overshoot, terminal PC, and
+register/flag state. Candidate command: `make install-bench-kirby-lto-zpspin`; report label:
+`0.4-bench-kirby-lto-linked-zpspin`. Keep only if the exact replay and visual gate pass and
+it beats the 29.59 ms linked-core baseline.
+
+Rev-A result: **ACCEPTED — CORRECT, MEASURABLE WIN.** The exact replay completed all
+2,010 frames with no skips or desynchronization, and the tester confirmed no graphical
+glitches.
+
+| metric | linked core | zero-page spin | delta |
+|---|---:|---:|---:|
+| `elapsed_ms` | 59484 | **58756** | **-728 ms (-1.2%)** |
+| `avg_frame_ms` | 29.59 | **29.23** | **-0.36 ms (-1.2%)** |
+| `best_frame_ms` | 2.00 | **1.00** | -1.00 ms |
+| `worst_frame_ms` | 43.00 | 43.00 | 0.00 ms |
+| `slow_frames` | 1916 | **1900** | -16 |
+| `estimated_fps` | 33.79 | **34.21** | +0.42 |
+
+The elapsed-time delta is far larger than the stable control spread and matches the expected
+effect of removing millions of redundant polling iterations. Promote
+`NES6502_ZP_BEQ_SPIN=ON` into `FAST_FLAGS`. Historical linked-core, fusion, pair-profile,
+and generic-chain targets explicitly keep it off so their original A/B rows remain
+reproducible.
+
 ---
 
 ## Two-tile background renderer probe — 2026-07-14

@@ -186,6 +186,14 @@ extern void nes6502_opcode_profile_reset(void);
 extern void nes6502_opcode_profile_snapshot(uint32 counts[256], uint32 *total);
 #endif
 
+#ifdef NES6502_PAIRPROFILE
+#define NES6502_PAIRPROFILE_TOP 16
+extern void nes6502_pair_profile_reset(void);
+extern void nes6502_pair_profile_snapshot_top(
+    uint16 pairs[NES6502_PAIRPROFILE_TOP],
+    uint32 counts[NES6502_PAIRPROFILE_TOP], uint32 *total, uint32 *dropped);
+#endif
+
 #ifdef NES6502_PRGPROFILE
 extern void nes6502_prg_profile_reset(void);
 extern void nes6502_prg_profile_snapshot(uint32 counts[16], uint32 *total);

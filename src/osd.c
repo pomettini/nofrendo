@@ -9,6 +9,7 @@
 #include <osd.h>
 #include <nofrendo.h>
 #include <nes.h>
+#include <nes6502.h>
 
 #ifdef PD_PLAYBENCH_ENABLED
 #include "pd_playbench.h"
@@ -229,6 +230,35 @@ static int playdate_update(void *ud) {
         static int bench_end_shown = 0;
         if (!bench_end_shown) {
             bench_end_shown = 1;
+#ifdef NES6502_PAIRPROFILE
+            {
+                uint16 pairs[NES6502_PAIRPROFILE_TOP];
+                uint32 counts[NES6502_PAIRPROFILE_TOP];
+                uint32 total = 0, dropped = 0;
+                nes6502_pair_profile_snapshot_top(pairs, counts, &total, &dropped);
+                pd->system->logToConsole(
+                    "[pairprof] total=%u dropped=%u top=%02X%02X:%u %02X%02X:%u %02X%02X:%u %02X%02X:%u %02X%02X:%u %02X%02X:%u %02X%02X:%u %02X%02X:%u",
+                    (unsigned)total, (unsigned)dropped,
+                    pairs[0] >> 8, pairs[0] & 0xFF, (unsigned)counts[0],
+                    pairs[1] >> 8, pairs[1] & 0xFF, (unsigned)counts[1],
+                    pairs[2] >> 8, pairs[2] & 0xFF, (unsigned)counts[2],
+                    pairs[3] >> 8, pairs[3] & 0xFF, (unsigned)counts[3],
+                    pairs[4] >> 8, pairs[4] & 0xFF, (unsigned)counts[4],
+                    pairs[5] >> 8, pairs[5] & 0xFF, (unsigned)counts[5],
+                    pairs[6] >> 8, pairs[6] & 0xFF, (unsigned)counts[6],
+                    pairs[7] >> 8, pairs[7] & 0xFF, (unsigned)counts[7]);
+                pd->system->logToConsole(
+                    "[pairprof] next=%02X%02X:%u %02X%02X:%u %02X%02X:%u %02X%02X:%u %02X%02X:%u %02X%02X:%u %02X%02X:%u %02X%02X:%u",
+                    pairs[8] >> 8, pairs[8] & 0xFF, (unsigned)counts[8],
+                    pairs[9] >> 8, pairs[9] & 0xFF, (unsigned)counts[9],
+                    pairs[10] >> 8, pairs[10] & 0xFF, (unsigned)counts[10],
+                    pairs[11] >> 8, pairs[11] & 0xFF, (unsigned)counts[11],
+                    pairs[12] >> 8, pairs[12] & 0xFF, (unsigned)counts[12],
+                    pairs[13] >> 8, pairs[13] & 0xFF, (unsigned)counts[13],
+                    pairs[14] >> 8, pairs[14] & 0xFF, (unsigned)counts[14],
+                    pairs[15] >> 8, pairs[15] & 0xFF, (unsigned)counts[15]);
+            }
+#endif
             const char *ferr = NULL;
             LCDFont *f = pd->graphics->loadFont(
                 "/System/Fonts/Asheville-Sans-14-Bold.pft", &ferr);

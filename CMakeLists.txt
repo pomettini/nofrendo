@@ -134,6 +134,11 @@ option(NES6502_FAST_MEMOPS "Hand-specialize hot 6502 memory load/store opcodes" 
 option(NES6502_HOT_CLUSTER "Cluster measured-hot opcode case bodies first in the dispatch switch" OFF)
 option(NES6502_JMP_SPIN "Fast-forward self-JMP idle loops to the end of the CPU slice" OFF)
 option(NES6502_LINEAR_ROM "Fast-path CPU ROM reads when $8000-$FFFF is one contiguous host block" OFF)
+option(NES6502_LINKED_CORE "Execute the linked 6502 core directly instead of copying it to heap SRAM" OFF)
+option(NES6502_FUSE_INCDEC_BNE "Fuse common register inc/dec plus BNE interpreter pairs" OFF)
+option(NES6502_PAIRPROFILE "Profile executed 6502 opcode transitions (diagnostic only)" OFF)
+option(NES6502_CHAIN_F0_A5 "Chain the profiled-hot BEQ/LDA-zp opcode transitions" OFF)
+option(NES6502_ZP_BEQ_SPIN "Fast-forward stable LDA-zp/BEQ-back polling loops" OFF)
 option(NES6502_TCMHOT_PROBE "Relocate tiny 6502 hot-core probes into the Playdate DTCM stack pool" OFF)
 option(NES6502_TCMHOT_CORE "Run a tiny relocated 6502 hot-opcode core before falling back" OFF)
 option(NES6502_TCMHOT_CORE_STATS "Log DTCM hot-core hit/cycle attribution counters" OFF)
@@ -215,6 +220,11 @@ set(GAME_DEFINES
     $<$<BOOL:${NES6502_HOT_CLUSTER}>:NES6502_HOT_CLUSTER=1>
     $<$<BOOL:${NES6502_JMP_SPIN}>:NES6502_JMP_SPIN=1>
     $<$<BOOL:${NES6502_LINEAR_ROM}>:NES6502_LINEAR_ROM=1>
+    $<$<BOOL:${NES6502_LINKED_CORE}>:NES6502_LINKED_CORE=1>
+    $<$<BOOL:${NES6502_FUSE_INCDEC_BNE}>:NES6502_FUSE_INCDEC_BNE=1>
+    $<$<BOOL:${NES6502_PAIRPROFILE}>:NES6502_PAIRPROFILE=1>
+    $<$<BOOL:${NES6502_CHAIN_F0_A5}>:NES6502_CHAIN_F0_A5=1>
+    $<$<BOOL:${NES6502_ZP_BEQ_SPIN}>:NES6502_ZP_BEQ_SPIN=1>
     $<$<BOOL:${NES6502_TCMHOT_PROBE}>:NES6502_TCMHOT_PROBE=1>
     $<$<BOOL:${NES6502_TCMHOT_CORE}>:NES6502_TCMHOT_CORE=1>
     $<$<BOOL:${NES6502_TCMHOT_CORE_STATS}>:NES6502_TCMHOT_CORE_STATS=1>
