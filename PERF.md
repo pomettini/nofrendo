@@ -362,6 +362,11 @@ label `0.4-bench-kirby-lto-noclone`. Static inspection passed narrowly: `.text` 
 7,188-byte `nes_renderframe.constprop.0`, so this did not isolate that entire clone; it is
 only a 1,112-byte layout reduction. Keep it only if F746 timing is not worse than full LTO.
 
+Two subsequent F746 full-LTO confirmation runs reported 62,811/62,819 ms total,
+31.25/31.25 ms average, 46/46 ms worst, and 32.00/32.00 estimated fps. Together with the
+first 31.24 ms row, this establishes run-to-run stability within 0.01 ms average and
+confirms the gain is not noise.
+
 F746 no-IPA-clone result: **REJECTED.** The exact replay completed with no skips, but the
 smaller image was materially slower than full LTO.
 
