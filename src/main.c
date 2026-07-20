@@ -414,7 +414,11 @@ static const char *bench_find_rom(void) {
 #define BUNDLED_SCRIPT_PATH "nes_kirby_adventure_1_1.txt"
 #define BENCH_TEST_NAME "nes_kirby_adventure_1_1"
 #define BENCH_ROM_NAME "Kirby's Adventure"
-#if defined(PD_PLAYBENCH_FIXED_SKIP)
+#if defined(PD_PLAYBENCH_AUTO_SKIP)
+#define BENCH_BUILD_LABEL "0.4-bench-kirby-auto"
+#elif defined(PD_PLAYBENCH_FIXED_SKIP) && PD_PLAYBENCH_FIXED_SKIP == 2
+#define BENCH_BUILD_LABEL "0.4-bench-kirby-fs2"
+#elif defined(PD_PLAYBENCH_FIXED_SKIP)
 #define BENCH_BUILD_LABEL "0.4-bench-kirby-fs1"
 #elif defined(NES6502_PCPROFILE) && defined(NES6502_ZP_BEQ_SPIN)
 #define BENCH_BUILD_LABEL "0.4-bench-kirby-pcprof"
@@ -641,6 +645,9 @@ int eventHandler(PlaydateAPI *playdate, PDSystemEvent event, uint32_t arg) {
     pd = playdate;
     pd->display->setRefreshRate(60.0f);
     osd_load_settings(); /* restore saved Frameskip / Show FPS preferences */
+#ifdef PD_PLAYBENCH_AUTO_SKIP
+    osd_set_frame_skip(-1); /* benchmark the shipping Auto policy, not saved UI state */
+#endif
 #ifndef NES6502_LINKED_CORE
     nes6502_itcm_init(
         pd->system

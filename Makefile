@@ -6,11 +6,11 @@ TOOLCHAIN = $(SDK)/C_API/buildsupport/arm.cmake
 # shipping configuration is FAST_FLAGS: the full set of promoted optimizations.
 # Every option here is validated on device; see PERF.md for the full history.
 BASE_FLAGS = -DCMAKE_BUILD_TYPE=Release -DENABLE_LTO=OFF -DENABLE_LTO_NO_IPA_CLONE=OFF -DAUDIO=ON -DAUDIO_DIRECT_RING=ON -DDIAG=OFF -DDIAG_FPS_ONLY=OFF -DPPU_BG=ON -DPPU_SPRITES=ON -DPPU_BLIT=ON -DPPU_BG_PAIR_FAST=OFF -DPPU_DIRECT_1BIT=OFF -DPPU_BG_TILE_CACHE_SMALL=OFF -DPPU_FAST_STRIKE=OFF -DPPU_SPRITE_CACHE_DRAW_ONLY=OFF -DPPU_FAST_OAMDMA=OFF -DNES_FIXED_SCANLINE_CYCLES=OFF -DALIGN_PRG_ROM=OFF -DNES_PRG_PAGE_COPY=OFF -DNES_PRG_CACHE_COLOR=OFF -DDIAG_CPU_EXEC_TIMING=OFF -DNES_CPU_BATCH_SCANLINES=1 -DNES_CPU_CYCLE_PERCENT=100 -DNES6502_OPT_LEVEL=O3 -DNES6502_JUMPTABLE_DISPATCH=OFF -DNES6502_LAZY_CYCLES=OFF -DNES6502_ALIGN_LOOPS=OFF -DNES6502_SPINHACK=OFF -DNES6502_OPPROFILE=OFF -DNES6502_PCPROFILE=OFF -DNES6502_FAST_PC_OPS=OFF -DNES6502_HOTOPS=OFF -DNES6502_FAST_MEMIO=OFF -DNES6502_DIRECT_MEMIO=OFF -DNES6502_DIRECT_CART_RAM=OFF -DNES6502_FAST_JMP_ABS=OFF -DNES6502_FAST_JMP_INDIRECT=OFF -DNES6502_FAST_BNE=OFF -DNES6502_FAST_BPL=OFF -DNES6502_FAST_BEQ=OFF -DNES6502_FAST_BRANCHES=OFF -DNES6502_FAST_OPERAND_BYTES=OFF -DNES6502_FAST_MEMOPS=OFF -DNES6502_JMP_SPIN=OFF -DNES6502_LINEAR_ROM=OFF -DNES6502_LINKED_CORE=OFF -DNES6502_FUSE_INCDEC_BNE=OFF -DNES6502_PAIRPROFILE=OFF -DNES6502_CHAIN_F0_A5=OFF -DNES6502_ZP_BEQ_SPIN=OFF -DNES6502_STA_ABSY_PAGEFILL=OFF -DNES6502_PAD_SERIAL_LOOP=OFF -DNES6502_RESIDUAL_COPY_LOOPS=OFF -DNES6502_COMPACT_CORE=OFF -DNES6502_DTCM_CODEGEN_PROBE=OFF -DNES6502_DTCM_PAGEFILL_BLOCK=OFF -DNES6502_TCMHOT_PROBE=OFF -DNES6502_TCMHOT_CORE=OFF -DNES6502_TCMHOT_CORE_STATS=OFF -DNES_RAM_DTCM=OFF -DNES6502_HOT_CLUSTER=OFF -DDTCM_POOL_SCAN=OFF -DPPU_SPRITE_LIVE_CHR=OFF -DNES_IRQ_MAPPER_BATCH=OFF -DNES_IRQ_MAPPER_BATCH_IRQ_SCOPE=OFF -DNES6502_PRGPROFILE=OFF -DNES_PRG_DTCM=OFF -DPD_PLAYBENCH=OFF -DPD_PLAYBENCH_KIRBY=OFF -DPD_PLAYBENCH_RECORD=OFF -DPD_PLAYBENCH_RECORD_KIRBY=OFF
-BASE_FLAGS += -DPPU_BG_PACKED_PAIR=OFF -DPPU_BG_QUAD_FAST=OFF -DNES6502_DTCM_LOOKUP_BLOCK=OFF -DPD_PLAYBENCH_FIXED_SKIP=OFF
+BASE_FLAGS += -DPPU_BG_PACKED_PAIR=OFF -DPPU_BG_QUAD_FAST=OFF -DNES6502_DTCM_LOOKUP_BLOCK=OFF -DPD_PLAYBENCH_FIXED_SKIP=OFF -DPD_PLAYBENCH_FIXED_SKIP2=OFF -DPD_PLAYBENCH_AUTO_SKIP=OFF
 FAST_FLAGS = $(BASE_FLAGS) -DPPU_FAST_OAMDMA=ON -DNES_CPU_BATCH_SCANLINES=16 -DNES6502_DIRECT_MEMIO=ON -DNES6502_FAST_JMP_ABS=ON -DNES6502_LAZY_CYCLES=ON -DNES6502_FAST_BNE=ON -DNES6502_FAST_BPL=ON -DNES6502_FAST_BEQ=ON -DNES6502_FAST_MEMOPS=ON -DNES_RAM_DTCM=ON -DNES_IRQ_MAPPER_BATCH=ON -DNES_IRQ_MAPPER_BATCH_IRQ_SCOPE=ON -DPPU_BG_PAIR_FAST=ON -DENABLE_LTO=ON -DNES6502_LINKED_CORE=ON -DNES6502_ZP_BEQ_SPIN=ON -DNES6502_STA_ABSY_PAGEFILL=ON -DNES6502_PAD_SERIAL_LOOP=ON
 FLAGS ?= $(FAST_FLAGS)
 
-.PHONY: bench-kirby-bgpack install-bench-kirby-bgpack bench-kirby-bgquad install-bench-kirby-bgquad bench-kirby-dtcmlookup install-bench-kirby-dtcmlookup bench-kirby-fs1 install-bench-kirby-fs1
+.PHONY: bench-kirby-bgpack install-bench-kirby-bgpack bench-kirby-bgquad install-bench-kirby-bgquad bench-kirby-dtcmlookup install-bench-kirby-dtcmlookup bench-kirby-fs1 install-bench-kirby-fs1 bench-kirby-fs2 install-bench-kirby-fs2 bench-kirby-auto install-bench-kirby-auto
 
 PDUTIL    = $(SDK)/bin/pdutil
 PORT      ?= $(shell ls /dev/cu.usbmodem* 2>/dev/null | head -1)
@@ -184,6 +184,21 @@ bench-kirby-fs1:
 	cmake -B build/device -DTOOLCHAIN=armgcc -DCMAKE_TOOLCHAIN_FILE=$(TOOLCHAIN) $(FAST_FLAGS) -DPD_PLAYBENCH_KIRBY=ON -DPD_PLAYBENCH_FIXED_SKIP=ON
 	cmake --build build/device
 	cmake -B build/sim $(FAST_FLAGS) -DPD_PLAYBENCH_KIRBY=ON -DPD_PLAYBENCH_FIXED_SKIP=ON
+	cmake --build build/sim
+
+# Deterministic boosted Auto-tier probe: render one frame, skip two frames.
+bench-kirby-fs2:
+	cmake -B build/device -DTOOLCHAIN=armgcc -DCMAKE_TOOLCHAIN_FILE=$(TOOLCHAIN) $(FAST_FLAGS) -DPD_PLAYBENCH_KIRBY=ON -DPD_PLAYBENCH_FIXED_SKIP2=ON
+	cmake --build build/device
+	cmake -B build/sim $(FAST_FLAGS) -DPD_PLAYBENCH_KIRBY=ON -DPD_PLAYBENCH_FIXED_SKIP2=ON
+	cmake --build build/sim
+
+# Production scheduler validation: Auto selects skip one or the validated
+# skip-two tier from measured work, exactly as the shipping build does.
+bench-kirby-auto:
+	cmake -B build/device -DTOOLCHAIN=armgcc -DCMAKE_TOOLCHAIN_FILE=$(TOOLCHAIN) $(FAST_FLAGS) -DPD_PLAYBENCH_KIRBY=ON -DPD_PLAYBENCH_AUTO_SKIP=ON
+	cmake --build build/device
+	cmake -B build/sim $(FAST_FLAGS) -DPD_PLAYBENCH_KIRBY=ON -DPD_PLAYBENCH_AUTO_SKIP=ON
 	cmake --build build/sim
 
 # Refined handler-safe cartridge-RAM path. Unlike the rejected first version,
@@ -369,6 +384,8 @@ install-bench-kirby-copyloops: bench-kirby-copyloops _push
 install-bench-kirby-dtcmblock1: bench-kirby-dtcmblock1 _push
 install-bench-kirby-dtcmlookup: bench-kirby-dtcmlookup _push
 install-bench-kirby-fs1: bench-kirby-fs1 _push
+install-bench-kirby-fs2: bench-kirby-fs2 _push
+install-bench-kirby-auto: bench-kirby-auto _push
 install-bench-kirby-cartram: bench-kirby-cartram _push
 install-bench-kirby-fastjmpi: bench-kirby-fastjmpi _push
 install-bench-kirby-bgpack: bench-kirby-bgpack _push

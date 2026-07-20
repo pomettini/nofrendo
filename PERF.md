@@ -291,6 +291,64 @@ reported visual skips, a synchronized 2,010-frame replay, no audio/graphical
 faults beyond the expected lower visual refresh, and average emulation work at
 or below the 20 ms PAL budget.
 
+Fixed-skip-one result: **large practical gain, slightly short of native rate**.
+The replay stayed synchronized and reported exactly 1,005 skipped visual frames;
+the semantic-loop counters were unchanged. Average work fell from 27.84 to
+**21.62 ms (-22.3%)** and estimated throughput rose from 35.92 to **46.26 FPS**.
+This proves visual rendering can be omitted without dropping emulated CPU/input/
+audio frames, but alternating draw/skip remains about 1.62 ms over the PAL budget.
+From the two measured averages, a skipped frame costs approximately 15.40 ms.
+
+`0.4-bench-kirby-fs2` now tests the production Auto scheduler's boosted tier:
+one rendered frame followed by two visual skips. The predicted average is
+approximately `(27.84 + 2*15.40) / 3 = 19.55 ms`, or 51.2 FPS. Its interpreter
+layout remains exactly identical to the accepted control. Pass gate: exactly
+1,340 skips, synchronized replay, clean audio/graphics, and average <=20 ms.
+
+Fixed-skip-two result: **PASS — native PAL rate reached on Rev A.** The replay
+completed in sync with exactly 1,340 skipped visual frames and unchanged
+page-fill/controller counters. It measured 38,803 ms total, **19.30 ms average**,
+37 ms worst, 857 slow frames, and **51.80 FPS**. This slightly beats the 19.55 ms
+prediction from the full-draw and skip-one rows. Game logic, input, IRQ/NMI, and
+audio still execute on every emulated frame; only two of each three visual frames
+are omitted. The final Kirby gate is a benchmark of the real production Auto
+scheduler, which should remain at skip one in affordable windows and enter this
+validated skip-two tier when its EMA exceeds 21 ms.
+
+Production Auto result: **PASS — Rev-A Kirby goal reached.** The exact replay
+completed at 39,634 ms total, **19.72 ms average**, 37 ms worst, 876 slow frames,
+1,272 visual skips, and **50.71 FPS**. It rendered 68 more frames than fixed
+skip two while remaining inside the PAL budget. The controller entered skip two
+when the EMA crossed 21 ms, returned to skip one only after its 50/300-frame
+hold and sub-18 ms exit gate, and immediately re-entered the long hold when a
+probe showed sustained load. Those periodic `2->1->2` transitions are deliberate
+capacity probes rather than rapid flapping. CPU/input/audio execution remained
+at all 2,010 frames and the page-fill/controller counters were unchanged.
+
+Conclusion: full visual rendering remains 27.84 ms / 35.92 FPS on F746, but the
+shipping Auto policy reaches native 50 Hz game speed on this worst-case PAL
+Kirby replay by adapting visual cadence only. The accepted production stack is
+full LTO, linked interpreter, corrected IRQ scope, background pairs, zero-page
+spin, page-fill fusion, controller-loop fusion, and Auto frameskip. Rejected
+native/PPU experiments stay default-off.
+
+Rev-B full-render regression (`0.4-bench-kirby-padloop`): **PASS.** The same
+2,010-frame replay completed in 36,329 ms at **18.07 ms average / 55.33 FPS**,
+with a 26 ms worst frame, 330 slow frames, zero visual skips, and unchanged
+page-fill/controller counters. This is 1.81 ms (9.1%) faster than the earlier
+Rev-B full-LTO reference of 19.88 ms / 50.30 FPS. Per the test-report convention,
+no accompanying note also confirms no observed graphical or audio glitches.
+
+Rev-B full-render SMB regression (`0.4-bench-prod-zpspin`): **PASS.** The PAL
+Europe replay completed all 2,879 frames in 44,101 ms at **15.32 ms average /
+65.28 FPS**, with a 21 ms worst frame, one slow frame, and zero visual skips.
+This is 0.18 ms faster than the previous current-version Rev-B reference of
+15.50 ms / 64.51 FPS. The ROM stored as `mario.nes` was content-verified as the
+Europe Rev A image (SHA-1 `ab30029efec6ccfc5d65dfda7fbc6e6489a80805`) and
+given a region-bearing alias so the strict benchmark filename guard could admit
+it. This was an automated serial-console run; no separate audiovisual judgment
+was made during this row.
+
 ## Two-tile background renderer probe — 2026-07-14
 
 Hypothesis: for the common mapper path where `ppu.latchfunc == NULL`, background

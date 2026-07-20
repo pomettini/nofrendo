@@ -69,6 +69,8 @@ endif()
 option(PD_PLAYBENCH "Build the pd-playbench scripted-input replay/benchmark (dev only)" OFF)
 option(PD_PLAYBENCH_KIRBY "Replay the deterministic Kirby's Adventure 1-1 smoke test" OFF)
 option(PD_PLAYBENCH_FIXED_SKIP "Use a deterministic draw/skip cadence during replay" OFF)
+option(PD_PLAYBENCH_FIXED_SKIP2 "Use a deterministic draw-one/skip-two cadence during replay" OFF)
+option(PD_PLAYBENCH_AUTO_SKIP "Exercise the production Auto frameskip scheduler during replay" OFF)
 option(PD_PLAYBENCH_RECORD "Build the pd-playbench recorder: capture a script from live play (dev only)" OFF)
 option(PD_PLAYBENCH_RECORD_KIRBY "Record Kirby via the ROM picker with distinct NES Start input" OFF)
 if (PD_PLAYBENCH_KIRBY)
@@ -280,6 +282,18 @@ if (PD_PLAYBENCH_FIXED_SKIP)
         src/main.c
         src/osd.c
         APPEND PROPERTY COMPILE_DEFINITIONS PD_PLAYBENCH_FIXED_SKIP=1)
+endif()
+if (PD_PLAYBENCH_FIXED_SKIP2)
+    set_property(SOURCE
+        src/main.c
+        src/osd.c
+        APPEND PROPERTY COMPILE_DEFINITIONS PD_PLAYBENCH_FIXED_SKIP=2)
+endif()
+if (PD_PLAYBENCH_AUTO_SKIP)
+    set_property(SOURCE
+        src/main.c
+        src/osd.c
+        APPEND PROPERTY COMPILE_DEFINITIONS PD_PLAYBENCH_AUTO_SKIP=1)
 endif()
 
 # add_executable / add_library must come before including playdate_game.cmake

@@ -349,14 +349,22 @@ static int playdate_update(void *ud) {
 
     int auto_mode = (frame_skip == FRAME_SKIP_AUTO);
     int draw;
-#if defined(PD_PLAYBENCH_ENABLED) || defined(PD_PLAYBENCH_RECORD)
+#if defined(PD_PLAYBENCH_AUTO_SKIP)
+    if (skip_counter <= 0) {
+        draw = 1;
+        skip_counter = auto_boosted ? AUTO_SKIP_BOOSTED : AUTO_SKIP_BASE;
+    } else {
+        draw = 0;
+        skip_counter--;
+    }
+#elif defined(PD_PLAYBENCH_ENABLED) || defined(PD_PLAYBENCH_RECORD)
     /* Emulate every frame fully so record/replay are frame-deterministic. Frameskip
        takes the approximate sprite-0-hit path (nes_ppu.c) on skipped frames, and
        Auto skip is real-time dependent, which desyncs a replay from its recording. */
 #ifdef PD_PLAYBENCH_FIXED_SKIP
     if (skip_counter <= 0) {
         draw = 1;
-        skip_counter = 1;
+        skip_counter = PD_PLAYBENCH_FIXED_SKIP;
     } else {
         draw = 0;
         skip_counter--;
@@ -413,7 +421,7 @@ static int playdate_update(void *ud) {
                 auto_ema_fp < AUTO_BOOST_EXIT_FP) {
                 auto_boosted = 0;
                 auto_frames_since_exit = 0;
-#ifdef DIAG
+#if defined(DIAG) || defined(PD_PLAYBENCH_AUTO_SKIP)
                 pd->system->logToConsole("[autoskip] 2->1 after %d frames",
                                          auto_boost_age);
 #endif
@@ -427,7 +435,7 @@ static int playdate_update(void *ud) {
                 auto_boost_hold = (auto_frames_since_exit < AUTO_FLAP_WINDOW)
                                       ? AUTO_BOOST_HOLD_LONG
                                       : AUTO_BOOST_MIN_FRAMES;
-#ifdef DIAG
+#if defined(DIAG) || defined(PD_PLAYBENCH_AUTO_SKIP)
                 pd->system->logToConsole("[autoskip] 1->2 ema=%d/16 ms hold=%d",
                                          (int)auto_ema_fp, auto_boost_hold);
 #endif
