@@ -201,7 +201,9 @@ static int save_mapperblock(nes_t *state, SNSS_FILE *snssFile)
 
    /* TODO: snss spec should be updated, using 4kB ROM pages.. */
    for (i = 0; i < 4; i++)
-      snssFile->mapperBlock.prgPages[i] = (state->cpu->mem_page[(i + 4) * 2] - state->rominfo->rom) >> 13;
+      snssFile->mapperBlock.prgPages[i] =
+         rom_prg_page_index(state->rominfo,
+                            state->cpu->mem_page[(i + 4) * 2]) >> 1;
 
    if (state->rominfo->vrom_banks)
    {

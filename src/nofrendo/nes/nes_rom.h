@@ -45,6 +45,11 @@ typedef struct rominfo_s
    /* pointers to ROM and VROM */
    uint8 *rom, *vrom;
 
+   /* Optional independently placed 4KB PRG pages. The original contiguous
+      image remains owned by the OSD because CHR data follows it. */
+   uint8 **rom_pages;
+   void *rom_pages_storage;
+
    /* pointers to SRAM and VRAM */
    uint8 *sram, *vram;
 
@@ -59,6 +64,18 @@ typedef struct rominfo_s
 
    char filename[PATH_MAX + 1];
 } rominfo_t;
+
+static inline uint8 *rom_prg_page(rominfo_t *rominfo, int page)
+{
+#ifdef NES_PRG_PAGE_COPY
+   return rominfo->rom_pages ? rominfo->rom_pages[page]
+                             : rominfo->rom + (page << 12);
+#else
+   return rominfo->rom + (page << 12);
+#endif
+}
+
+extern int rom_prg_page_index(rominfo_t *rominfo, const uint8 *address);
 
 
 extern int rom_checkmagic(const char *filename);

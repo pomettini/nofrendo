@@ -20,6 +20,15 @@ SECTIONS
         . = ALIGN(16);
         __tcmhot_end = .;
 
+        /* Relocation-free native block templates copied into the measured
+           DTCM code pool at startup. */
+        . = ALIGN(16);
+        __jitblock_start = .;
+        KEEP(*(.jitblock))
+        KEEP(*(.jitblock.*))
+        . = ALIGN(4);
+        __jitblock_end = .;
+
         /* ppu_scanline still pinned immediately after, cache-line aligned. */
         . = ALIGN(32);
         *(.text.ppu_scanline)

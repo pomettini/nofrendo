@@ -68,6 +68,7 @@ endif()
 # pd-playbench: scripted-input benchmark harness, dev-only (never in release)
 option(PD_PLAYBENCH "Build the pd-playbench scripted-input replay/benchmark (dev only)" OFF)
 option(PD_PLAYBENCH_KIRBY "Replay the deterministic Kirby's Adventure 1-1 smoke test" OFF)
+option(PD_PLAYBENCH_FIXED_SKIP "Use a deterministic draw/skip cadence during replay" OFF)
 option(PD_PLAYBENCH_RECORD "Build the pd-playbench recorder: capture a script from live play (dev only)" OFF)
 option(PD_PLAYBENCH_RECORD_KIRBY "Record Kirby via the ROM picker with distinct NES Start input" OFF)
 if (PD_PLAYBENCH_KIRBY)
@@ -97,6 +98,10 @@ option(PPU_BG      "Enable PPU background rendering (OFF to measure cost)" ON)
 option(PPU_SPRITES "Enable PPU sprite rendering (OFF to measure cost)" ON)
 option(PPU_BLIT    "Enable Playdate scanline blit (OFF to measure cost)" ON)
 option(PPU_BG_PAIR_FAST "Render the common no-latch background path two tiles at a time" OFF)
+option(PPU_BG_PACKED_PAIR "Render no-latch background pairs with packed Cortex-M7 byte selects" OFF)
+option(PPU_BG_QUAD_FAST "Render aligned no-latch background attribute groups four tiles at a time" OFF)
+option(PPU_DIRECT_1BIT "Compose no-latch PPU scanlines directly into Playdate 1-bit rows" OFF)
+option(PPU_BG_TILE_CACHE_SMALL "Cache decoded visible background tile rows in a small tagged table" OFF)
 option(PPU_FAST_STRIKE "Return sprite-zero hit as soon as it is detected" OFF)
 option(PPU_SPRITE_CACHE_DRAW_ONLY "Build the sprite render cache only on drawn frames" OFF)
 option(PPU_FAST_OAMDMA "Copy sprite DMA from mapped CPU memory without 256 helper calls" OFF)
@@ -106,6 +111,8 @@ option(PPU_SPRITE_LIVE_CHR "Read sprite CHR live instead of the scanline-0 patte
 option(NES_IRQ_MAPPER_BATCH "Batch CPU across IRQ-free scanlines for hblank-IRQ mappers (MMC3 etc.) using the mapper IRQ countdown" OFF)
 option(NES_IRQ_MAPPER_BATCH_IRQ_SCOPE "Use per-scanline CPU execution from hardware IRQ entry through RTI" OFF)
 option(ALIGN_PRG_ROM "Align iNES PRG ROM start for cache experiments" OFF)
+option(NES_PRG_PAGE_COPY "Copy PRG into independently addressable 4KB pages" OFF)
+option(NES_PRG_CACHE_COLOR "Skew copied 4KB PRG pages by one D-cache line" OFF)
 option(DIAG_CPU_EXEC_TIMING "Time every nes6502_execute call in diagnostic builds" OFF)
 set(NES_CPU_BATCH_SCANLINES "1" CACHE STRING
     "Run NES CPU cycles in batches this many scanlines wide for no-hblank mappers")
@@ -118,13 +125,16 @@ option(NES6502_LAZY_CYCLES "Commit total CPU cycles once per execute slice inste
 option(NES6502_ALIGN_LOOPS "Align 6502 hot loops for performance experiments" OFF)
 option(NES6502_SPINHACK "Fast-forward selected PPUSTATUS polling loops" OFF)
 option(NES6502_OPPROFILE "Count executed 6502 opcodes in diagnostic windows" OFF)
+option(NES6502_PCPROFILE "Count executed 6502 instruction addresses for hot-block selection" OFF)
 option(NES6502_PRGPROFILE "Histogram executed instructions per 4KB PRG page (DTCM-relocation candidate finder)" OFF)
 option(NES_PRG_DTCM "Mirror the hottest PRG page ($C000) into DTCM via relocate-on-map" OFF)
 option(NES6502_FAST_PC_OPS "Use pc_ptr for operand fetches and same-bank branches" OFF)
 option(NES6502_HOTOPS "Hand-specialize the hottest measured 6502 opcodes" OFF)
 option(NES6502_FAST_MEMIO "Bypass generic memory-handler scans for NES RAM mirror ranges" OFF)
 option(NES6502_DIRECT_MEMIO "Bypass memory-handler scans for common RAM/PPU/APU/input ranges" OFF)
+option(NES6502_DIRECT_CART_RAM "Bypass memory-handler scans for directly mapped $6000-$7FFF cartridge RAM" OFF)
 option(NES6502_FAST_JMP_ABS "Fast-path 6502 JMP absolute operand fetch" OFF)
+option(NES6502_FAST_JMP_INDIRECT "Fetch JMP-indirect operands through the cached PC pointer" OFF)
 option(NES6502_FAST_BNE "Fast-path only the hot BNE relative branch" OFF)
 option(NES6502_FAST_BPL "Fast-path only the hot BPL relative branch" OFF)
 option(NES6502_FAST_BEQ "Fast-path only the hot BEQ relative branch" OFF)
@@ -139,6 +149,13 @@ option(NES6502_FUSE_INCDEC_BNE "Fuse common register inc/dec plus BNE interprete
 option(NES6502_PAIRPROFILE "Profile executed 6502 opcode transitions (diagnostic only)" OFF)
 option(NES6502_CHAIN_F0_A5 "Chain the profiled-hot BEQ/LDA-zp opcode transitions" OFF)
 option(NES6502_ZP_BEQ_SPIN "Fast-forward stable LDA-zp/BEQ-back polling loops" OFF)
+option(NES6502_STA_ABSY_PAGEFILL "Collapse pattern-matched STA-abs,Y RAM page-fill loops" OFF)
+option(NES6502_PAD_SERIAL_LOOP "Collapse pattern-matched eight-bit controller serial loops" OFF)
+option(NES6502_RESIDUAL_COPY_LOOPS "Collapse profiled RAM-copy and PPU-stream loops" OFF)
+option(NES6502_COMPACT_CORE "Compile the linked 6502 interpreter for Thumb-2 code density" OFF)
+option(NES6502_DTCM_CODEGEN_PROBE "Generate and execute a tiny Thumb function in uncached DTCM" OFF)
+option(NES6502_DTCM_PAGEFILL_BLOCK "Execute the page-fill native block from the DTCM code pool" OFF)
+option(NES6502_DTCM_LOOKUP_BLOCK "Execute a profiled multi-instruction lookup/RTS block from DTCM" OFF)
 option(NES6502_TCMHOT_PROBE "Relocate tiny 6502 hot-core probes into the Playdate DTCM stack pool" OFF)
 option(NES6502_TCMHOT_CORE "Run a tiny relocated 6502 hot-opcode core before falling back" OFF)
 option(NES6502_TCMHOT_CORE_STATS "Log DTCM hot-core hit/cycle attribution counters" OFF)
@@ -186,6 +203,9 @@ set(GAME_DEFINES
     $<$<NOT:$<BOOL:${PPU_SPRITES}>>:DISABLE_PPU_SPRITES=1>
     $<$<NOT:$<BOOL:${PPU_BLIT}>>:DISABLE_PPU_BLIT=1>
     $<$<BOOL:${PPU_BG_PAIR_FAST}>:PPU_BG_PAIR_FAST=1>
+    $<$<BOOL:${PPU_BG_PACKED_PAIR}>:PPU_BG_PACKED_PAIR=1>
+    $<$<BOOL:${PPU_DIRECT_1BIT}>:PPU_DIRECT_1BIT=1>
+    $<$<BOOL:${PPU_BG_TILE_CACHE_SMALL}>:PPU_BG_TILE_CACHE_SMALL=1>
     $<$<BOOL:${PPU_FAST_STRIKE}>:PPU_FAST_STRIKE=1>
     $<$<BOOL:${PPU_SPRITE_CACHE_DRAW_ONLY}>:PPU_SPRITE_CACHE_DRAW_ONLY=1>
     $<$<BOOL:${PPU_FAST_OAMDMA}>:PPU_FAST_OAMDMA=1>
@@ -195,6 +215,8 @@ set(GAME_DEFINES
     $<$<BOOL:${NES_IRQ_MAPPER_BATCH}>:NES_IRQ_MAPPER_BATCH=1>
     $<$<BOOL:${NES_IRQ_MAPPER_BATCH_IRQ_SCOPE}>:NES_IRQ_MAPPER_BATCH_IRQ_SCOPE=1>
     $<$<BOOL:${ALIGN_PRG_ROM}>:ALIGN_PRG_ROM=1>
+    $<$<OR:$<BOOL:${NES_PRG_PAGE_COPY}>,$<BOOL:${NES_PRG_CACHE_COLOR}>>:NES_PRG_PAGE_COPY=1>
+    $<$<BOOL:${NES_PRG_CACHE_COLOR}>:NES_PRG_CACHE_COLOR=1>
     $<$<BOOL:${DIAG_CPU_EXEC_TIMING}>:DIAG_CPU_EXEC_TIMING=1>
     NES_CPU_BATCH_SCANLINES=${NES_CPU_BATCH_SCANLINES}
     NES_CPU_CYCLE_PERCENT=${NES_CPU_CYCLE_PERCENT}
@@ -204,13 +226,16 @@ set(GAME_DEFINES
     $<$<BOOL:${NES6502_ALIGN_LOOPS}>:NES6502_ALIGN_LOOPS=1>
     $<$<BOOL:${NES6502_SPINHACK}>:NES6502_SPINHACK=1>
     $<$<BOOL:${NES6502_OPPROFILE}>:NES6502_OPPROFILE=1>
+    $<$<BOOL:${NES6502_PCPROFILE}>:NES6502_PCPROFILE=1>
     $<$<BOOL:${NES6502_PRGPROFILE}>:NES6502_PRGPROFILE=1>
     $<$<BOOL:${NES_PRG_DTCM}>:NES_PRG_DTCM=1>
     $<$<BOOL:${NES6502_FAST_PC_OPS}>:NES6502_FAST_PC_OPS=1>
     $<$<BOOL:${NES6502_HOTOPS}>:NES6502_HOTOPS=1>
     $<$<BOOL:${NES6502_FAST_MEMIO}>:NES6502_FAST_MEMIO=1>
     $<$<BOOL:${NES6502_DIRECT_MEMIO}>:NES6502_DIRECT_MEMIO=1>
+    $<$<BOOL:${NES6502_DIRECT_CART_RAM}>:NES6502_DIRECT_CART_RAM=1>
     $<$<BOOL:${NES6502_FAST_JMP_ABS}>:NES6502_FAST_JMP_ABS=1>
+    $<$<BOOL:${NES6502_FAST_JMP_INDIRECT}>:NES6502_FAST_JMP_INDIRECT=1>
     $<$<BOOL:${NES6502_FAST_BNE}>:NES6502_FAST_BNE=1>
     $<$<BOOL:${NES6502_FAST_BPL}>:NES6502_FAST_BPL=1>
     $<$<BOOL:${NES6502_FAST_BEQ}>:NES6502_FAST_BEQ=1>
@@ -225,11 +250,37 @@ set(GAME_DEFINES
     $<$<BOOL:${NES6502_PAIRPROFILE}>:NES6502_PAIRPROFILE=1>
     $<$<BOOL:${NES6502_CHAIN_F0_A5}>:NES6502_CHAIN_F0_A5=1>
     $<$<BOOL:${NES6502_ZP_BEQ_SPIN}>:NES6502_ZP_BEQ_SPIN=1>
+    $<$<BOOL:${NES6502_STA_ABSY_PAGEFILL}>:NES6502_STA_ABSY_PAGEFILL=1>
+    $<$<BOOL:${NES6502_PAD_SERIAL_LOOP}>:NES6502_PAD_SERIAL_LOOP=1>
+    $<$<BOOL:${NES6502_RESIDUAL_COPY_LOOPS}>:NES6502_RESIDUAL_COPY_LOOPS=1>
+    $<$<BOOL:${NES6502_COMPACT_CORE}>:NES6502_COMPACT_CORE=1>
+    $<$<BOOL:${NES6502_DTCM_CODEGEN_PROBE}>:NES6502_DTCM_CODEGEN_PROBE=1>
+    $<$<BOOL:${NES6502_DTCM_PAGEFILL_BLOCK}>:NES6502_DTCM_PAGEFILL_BLOCK=1>
+    $<$<BOOL:${NES6502_DTCM_LOOKUP_BLOCK}>:NES6502_DTCM_LOOKUP_BLOCK=1>
     $<$<BOOL:${NES6502_TCMHOT_PROBE}>:NES6502_TCMHOT_PROBE=1>
     $<$<BOOL:${NES6502_TCMHOT_CORE}>:NES6502_TCMHOT_CORE=1>
     $<$<BOOL:${NES6502_TCMHOT_CORE_STATS}>:NES6502_TCMHOT_CORE_STATS=1>
     $<$<BOOL:${NES_FIXED_SCANLINE_CYCLES}>:NES_FIXED_SCANLINE_CYCLES=1>
 )
+
+# Keep this PPU-only experiment out of the LTO command line for the 6502 core.
+# On the F746, merely perturbing that core's LTO partition changes its hot
+# layout enough to swamp sub-millisecond renderer measurements.
+if (PPU_BG_QUAD_FAST)
+    set_property(SOURCE
+        src/nofrendo/nes/nes_ppu.c
+        src/main.c
+        APPEND PROPERTY COMPILE_DEFINITIONS PPU_BG_QUAD_FAST=1)
+endif()
+
+# Benchmark-only scheduling probe. Scope the define to the two consumers so it
+# cannot perturb the 6502 translation unit's LTO input.
+if (PD_PLAYBENCH_FIXED_SKIP)
+    set_property(SOURCE
+        src/main.c
+        src/osd.c
+        APPEND PROPERTY COMPILE_DEFINITIONS PD_PLAYBENCH_FIXED_SKIP=1)
+endif()
 
 # add_executable / add_library must come before including playdate_game.cmake
 if (TOOLCHAIN STREQUAL "armgcc")
@@ -294,6 +345,11 @@ if (TOOLCHAIN STREQUAL "armgcc")
     endif()
     if (NES6502_ALIGN_LOOPS)
         string(APPEND NES6502_COMPILE_FLAGS " -falign-loops=32")
+    endif()
+    if (NES6502_COMPACT_CORE)
+        # Keep the rest of the emulator at O3; only trade interpreter code
+        # expansion for denser Thumb-2 here.  This flag is deliberately last.
+        string(APPEND NES6502_COMPILE_FLAGS " -Os")
     endif()
     if (NES6502_TCMHOT_PROBE OR NES6502_TCMHOT_CORE)
         string(APPEND NES6502_COMPILE_FLAGS " -mlong-calls -fno-lto")

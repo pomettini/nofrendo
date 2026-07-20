@@ -25,6 +25,7 @@
 
 #include <string.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <noftypes.h>
 #include <nes_ppu.h>
 #include <nes.h>
@@ -56,6 +57,36 @@
 /* the NES PPU */
 static ppu_t ppu;
 
+#ifdef PPU_BG_TILE_CACHE_SMALL
+#define BG_TILE_CACHE_SIZE 64u
+typedef struct bg_tile_cache_entry_s
+{
+   const uint8 *chr_row;
+   uint32 palette_word;
+   uint32 chr_generation;
+   uint32 pixels[2];
+} bg_tile_cache_entry_t;
+
+static bg_tile_cache_entry_t bg_tile_cache[BG_TILE_CACHE_SIZE];
+static uint32 bg_tile_chr_generation = 1;
+#endif
+
+#ifdef PPU_DIRECT_1BIT
+extern uint8 *vid_direct_row(int scanline);
+extern const uint8 *vid_dither_row(int scanline, int phase);
+static int direct_rendered_scanline = -1;
+#endif
+
+bool ppu_scanline_direct_rendered(int scanline)
+{
+#ifdef PPU_DIRECT_1BIT
+   return direct_rendered_scanline == scanline;
+#else
+   (void) scanline;
+   return false;
+#endif
+}
+
 
 void ppu_displaysprites(bool display)
 {
@@ -67,6 +98,10 @@ void ppu_setcontext(ppu_t *src_ppu)
    int nametab[4];
    ASSERT(src_ppu);
    ppu = *src_ppu;
+#ifdef PPU_BG_TILE_CACHE_SMALL
+   /* A restored context may reuse an address for unrelated CHR RAM. */
+   bg_tile_chr_generation++;
+#endif
 
    /* we can't just copy contexts here, because more than likely,
    ** the top 8 pages of the ppu are pointing to internal PPU memory,
@@ -238,6 +273,9 @@ static void mem_trash(uint8 *buffer, int length)
 /* reset state of ppu */
 void ppu_reset(int reset_type)
 {
+#ifdef PPU_BG_TILE_CACHE_SMALL
+   bg_tile_chr_generation++;
+#endif
    if (HARD_RESET == reset_type)
       mem_trash(ppu.oam, 256);
 
@@ -555,6 +593,10 @@ void ppu_write(uint32 address, uint8 value)
       break;
 
    case PPU_VDATA:
+#ifdef PPU_BG_TILE_CACHE_SMALL
+      if (ppu.vaddr < 0x2000)
+         bg_tile_chr_generation++;
+#endif
       if (ppu.vaddr < 0x3F00)
       {
          /* VRAM only accessible during scanlines 241-260 */
@@ -666,6 +708,104 @@ INLINE void draw_bgtile(uint8 *surface, uint8 pat1, uint8 pat2,
    *surface++ = colors[(pattern >> 8) & 3];
    *surface = colors[pattern & 3];
 }
+
+#ifdef PPU_BG_PACKED_PAIR
+/* Expand one CHR nibble into four byte-wide 0x00/0xFF selectors. The complete
+** table occupies two cache lines and replaces four indexed palette loads per
+** half-tile with Cortex-M7 parallel-byte selection. */
+static const uint32 bg_nibble_mask[16] =
+{
+   0x00000000u, 0xFF000000u, 0x00FF0000u, 0xFFFF0000u,
+   0x0000FF00u, 0xFF00FF00u, 0x00FFFF00u, 0xFFFFFF00u,
+   0x000000FFu, 0xFF0000FFu, 0x00FF00FFu, 0xFFFF00FFu,
+   0x0000FFFFu, 0xFF00FFFFu, 0x00FFFFFFu, 0xFFFFFFFFu
+};
+
+INLINE uint32 bg_select_four(uint32 plane0, uint32 plane1,
+                             uint32 c0, uint32 c1,
+                             uint32 c2, uint32 c3)
+{
+#if defined(__arm__) || defined(__thumb__)
+   uint32 dummy, low, high, output;
+   const uint32 ones = 0x01010101u;
+   __asm volatile (
+      "usub8 %[dummy], %[plane0], %[ones]\n\t"
+      "sel %[low], %[c1], %[c0]\n\t"
+      "sel %[high], %[c3], %[c2]\n\t"
+      "usub8 %[dummy], %[plane1], %[ones]\n\t"
+      "sel %[output], %[high], %[low]"
+      : [dummy] "=&r" (dummy), [low] "=&r" (low),
+        [high] "=&r" (high), [output] "=&r" (output)
+      : [plane0] "r" (plane0), [plane1] "r" (plane1),
+        [ones] "r" (ones), [c0] "r" (c0), [c1] "r" (c1),
+        [c2] "r" (c2), [c3] "r" (c3)
+      : "cc");
+   return output;
+#else
+   uint32 low = c0 ^ ((c0 ^ c1) & plane0);
+   uint32 high = c2 ^ ((c2 ^ c3) & plane0);
+   return low ^ ((low ^ high) & plane1);
+#endif
+}
+
+INLINE void draw_bgtile_pair_packed(uint8 *surface,
+                                    uint8 pat10, uint8 pat20,
+                                    uint8 pat11, uint8 pat21,
+                                    const uint8 *colors)
+{
+   uint32 palette;
+   uint32 c0, c1, c2, c3;
+   uint32 output;
+
+   memcpy(&palette, colors, sizeof(palette));
+   c0 = (palette & 0xFFu) * 0x01010101u;
+   c1 = ((palette >> 8) & 0xFFu) * 0x01010101u;
+   c2 = ((palette >> 16) & 0xFFu) * 0x01010101u;
+   c3 = (palette >> 24) * 0x01010101u;
+
+#define DRAW_PACKED_HALF(offset_, p0_, p1_, shift_)                           \
+   do                                                                         \
+   {                                                                          \
+      output = bg_select_four(bg_nibble_mask[((p0_) >> (shift_)) & 0x0F],    \
+                              bg_nibble_mask[((p1_) >> (shift_)) & 0x0F],    \
+                              c0, c1, c2, c3);                                \
+      memcpy(surface + (offset_), &output, sizeof(output));                   \
+   } while (0)
+
+   DRAW_PACKED_HALF(0, pat10, pat20, 4);
+   DRAW_PACKED_HALF(4, pat10, pat20, 0);
+   DRAW_PACKED_HALF(8, pat11, pat21, 4);
+   DRAW_PACKED_HALF(12, pat11, pat21, 0);
+
+#undef DRAW_PACKED_HALF
+}
+#endif
+
+#ifdef PPU_BG_TILE_CACHE_SMALL
+INLINE void draw_bgtile_cached(uint8 *surface, const uint8 *chr_row,
+                               const uint8 *colors)
+{
+   uint32 palette_word;
+   uintptr_t chr_tag = (uintptr_t)chr_row;
+   bg_tile_cache_entry_t *entry;
+
+   memcpy(&palette_word, colors, sizeof(palette_word));
+   entry = &bg_tile_cache[(chr_tag ^ (chr_tag >> 6)
+                          ^ (uintptr_t)(palette_word * 33u))
+                         & (BG_TILE_CACHE_SIZE - 1u)];
+
+   if (entry->chr_row != chr_row || entry->palette_word != palette_word
+       || entry->chr_generation != bg_tile_chr_generation)
+   {
+      entry->chr_row = chr_row;
+      entry->palette_word = palette_word;
+      entry->chr_generation = bg_tile_chr_generation;
+      draw_bgtile((uint8 *)entry->pixels, chr_row[0], chr_row[8], colors);
+   }
+
+   memcpy(surface, entry->pixels, sizeof(entry->pixels));
+}
+#endif
 
 INLINE int draw_oamtile(uint8 *surface, uint8 attrib, uint8 pat1,
                         uint8 pat2, const uint8 *col_tbl, bool check_strike)
@@ -804,12 +944,20 @@ static void ppu_renderbg(uint8 *vidbuf)
     * start, nametable seam, and final 33rd-tile cases exactly. */
    if (NULL == ppu.latchfunc)
    {
+#ifdef PPU_BG_TILE_CACHE_SMALL
+#define DRAW_BG_PIXELS_NO_LATCH()                                              \
+         draw_bgtile_cached(bmp_ptr, data_ptr, pal + col_high)
+#else
+#define DRAW_BG_PIXELS_NO_LATCH()                                              \
+         draw_bgtile(bmp_ptr, data_ptr[0], data_ptr[8], pal + col_high)
+#endif
+
 #define DRAW_BG_TILE_NO_LATCH()                                                \
       do                                                                       \
       {                                                                        \
          tile_index = *tile_ptr++;                                             \
          data_ptr = &PPU_MEM(bg_offset + (tile_index << 4));                   \
-         draw_bgtile(bmp_ptr, data_ptr[0], data_ptr[8], pal + col_high);        \
+         DRAW_BG_PIXELS_NO_LATCH();                                            \
          bmp_ptr += 8;                                                         \
       } while (0)
 
@@ -842,22 +990,93 @@ static void ppu_renderbg(uint8 *vidbuf)
          ADVANCE_BG_ATTRIBUTE();
       }
 
-      while (tile_count >= 2)
+#ifdef PPU_BG_QUAD_FAST
+      /* Attribute bytes describe four horizontal tiles (two palette pairs).
+       * Once the scrolled edge is aligned to a four-tile boundary, consume a
+       * complete attribute group per iteration. This preserves the existing
+       * pixel renderer while removing one loop test and the generic
+       * attribute-advance branch for every four visible tiles. */
+      if (tile_count >= 2 && (x_tile & 2))
       {
          DRAW_BG_TILE_NO_LATCH();
          DRAW_BG_TILE_NO_LATCH();
+         x_tile += 2;
+         tile_count -= 2;
+         if (tile_count)
+            ADVANCE_BG_ATTRIBUTE();
+      }
+
+      while (tile_count >= 4)
+      {
+         DRAW_BG_TILE_NO_LATCH();
+         DRAW_BG_TILE_NO_LATCH();
+
+         attrib_shift ^= 2;
+         col_high = ((attrib >> attrib_shift) & 3) << 2;
+
+         DRAW_BG_TILE_NO_LATCH();
+         DRAW_BG_TILE_NO_LATCH();
+
+         x_tile += 4;
+         tile_count -= 4;
+         if (tile_count)
+         {
+            if (32 == x_tile)
+            {
+               x_tile = 0;
+               refresh_vaddr ^= (1 << 10);
+               attrib_base ^= (1 << 10);
+               tile_ptr = &PPU_MEM(refresh_vaddr);
+               attrib_ptr = &PPU_MEM(attrib_base);
+            }
+            attrib = *attrib_ptr++;
+            attrib_shift ^= 2;
+            col_high = ((attrib >> attrib_shift) & 3) << 2;
+         }
+      }
+
+      if (tile_count >= 2)
+      {
+         DRAW_BG_TILE_NO_LATCH();
+         DRAW_BG_TILE_NO_LATCH();
+         x_tile += 2;
+         tile_count -= 2;
+         if (tile_count)
+            ADVANCE_BG_ATTRIBUTE();
+      }
+#else
+      while (tile_count >= 2)
+      {
+#ifdef PPU_BG_PACKED_PAIR
+         uint8 *data_ptr0;
+         uint8 *data_ptr1;
+         tile_index = *tile_ptr++;
+         data_ptr0 = &PPU_MEM(bg_offset + (tile_index << 4));
+         tile_index = *tile_ptr++;
+         data_ptr1 = &PPU_MEM(bg_offset + (tile_index << 4));
+         draw_bgtile_pair_packed(bmp_ptr,
+                                 data_ptr0[0], data_ptr0[8],
+                                 data_ptr1[0], data_ptr1[8],
+                                 pal + col_high);
+         bmp_ptr += 16;
+#else
+         DRAW_BG_TILE_NO_LATCH();
+         DRAW_BG_TILE_NO_LATCH();
+#endif
          x_tile += 2;
          tile_count -= 2;
 
          if (tile_count)
             ADVANCE_BG_ATTRIBUTE();
       }
+#endif
 
       if (tile_count)
          DRAW_BG_TILE_NO_LATCH();
 
 #undef ADVANCE_BG_ATTRIBUTE
 #undef DRAW_BG_TILE_NO_LATCH
+#undef DRAW_BG_PIXELS_NO_LATCH
    }
    else
 #endif
@@ -914,6 +1133,143 @@ static void ppu_renderbg(uint8 *vidbuf)
       ((uint32 *) buf_ptr)[1] = bg_clear;
    }
 }
+
+#ifdef PPU_DIRECT_1BIT
+/* Place one MSB-first 8-pixel tile at an arbitrary scrolled x position. Tiles
+   do not overlap, so the already-cleared destination can be filled with ORs. */
+INLINE void direct_or_tile(uint8 *row, int x, uint8 bits)
+{
+   if (x <= -8 || x >= NES_SCREEN_WIDTH)
+      return;
+
+   if (x < 0)
+   {
+      row[0] |= (uint8)(bits << -x);
+      return;
+   }
+
+   int byte = x >> 3;
+   int shift = x & 7;
+   row[byte] |= bits >> shift;
+   if (shift && byte + 1 < NES_SCREEN_WIDTH / 8)
+      row[byte + 1] |= (uint8)(bits << (8 - shift));
+}
+
+INLINE uint8 direct_tile_white(uint8 pat1, uint8 pat2,
+                               const uint8 *colors, const uint8 *white)
+{
+   uint32 pattern = ((pat2 & 0xAA) << 8) | ((pat2 & 0x55) << 1)
+                    | ((pat1 & 0xAA) << 7) | (pat1 & 0x55);
+
+   return (white[colors[(pattern >> 14) & 3]] & 0x80)
+        | (white[colors[(pattern >> 6) & 3]] & 0x40)
+        | (white[colors[(pattern >> 12) & 3]] & 0x20)
+        | (white[colors[(pattern >> 4) & 3]] & 0x10)
+        | (white[colors[(pattern >> 10) & 3]] & 0x08)
+        | (white[colors[(pattern >> 2) & 3]] & 0x04)
+        | (white[colors[(pattern >> 8) & 3]] & 0x02)
+        | (white[colors[pattern & 3]] & 0x01);
+}
+
+static void ppu_renderbg_direct(uint8 *row, uint8 *solid, int scanline)
+{
+   uint8 *data_ptr, *tile_ptr, *attrib_ptr;
+   uint8 *pal = ppu.palette;
+   uint32 refresh_vaddr, bg_offset, attrib_base;
+   int tile_count;
+   int output_x;
+   uint8 tile_index, x_tile, y_tile;
+   uint8 col_high, attrib, attrib_shift;
+
+   memset(row, 0, NES_SCREEN_WIDTH / 8);
+   memset(solid, 0, NES_SCREEN_WIDTH / 8);
+
+   if (false == ppu.bg_on)
+   {
+      const uint8 *white = vid_dither_row(scanline, 0);
+      memset(row, white[ppu.palette[0]], NES_SCREEN_WIDTH / 8);
+      return;
+   }
+
+   output_x = -ppu.tile_xofs;
+   const uint8 *white = vid_dither_row(scanline, output_x & 3);
+   refresh_vaddr = 0x2000 + (ppu.vaddr & 0x0FE0);
+   x_tile = ppu.vaddr & 0x1F;
+   y_tile = (ppu.vaddr >> 5) & 0x1F;
+   bg_offset = ((ppu.vaddr >> 12) & 7) + ppu.bg_base;
+
+   tile_ptr = &PPU_MEM(refresh_vaddr + x_tile);
+   attrib_base = (refresh_vaddr & 0x2C00) + 0x3C0 + ((y_tile & 0x1C) << 1);
+   attrib_ptr = &PPU_MEM(attrib_base + (x_tile >> 2));
+   attrib = *attrib_ptr++;
+   attrib_shift = (x_tile & 2) + ((y_tile & 2) << 1);
+   col_high = ((attrib >> attrib_shift) & 3) << 2;
+
+#define DRAW_BG_TILE_DIRECT()                                                  \
+   do                                                                          \
+   {                                                                           \
+      uint8 _pat1, _pat2;                                                      \
+      tile_index = *tile_ptr++;                                                \
+      data_ptr = &PPU_MEM(bg_offset + (tile_index << 4));                      \
+      _pat1 = data_ptr[0];                                                     \
+      _pat2 = data_ptr[8];                                                     \
+      direct_or_tile(row, output_x,                                             \
+                     direct_tile_white(_pat1, _pat2, pal + col_high, white));  \
+      direct_or_tile(solid, output_x, _pat1 | _pat2);                          \
+      output_x += 8;                                                           \
+   } while (0)
+
+#define ADVANCE_BG_ATTRIBUTE_DIRECT()                                          \
+   do                                                                          \
+   {                                                                           \
+      if (0 == (x_tile & 3))                                                   \
+      {                                                                        \
+         if (32 == x_tile)                                                     \
+         {                                                                     \
+            x_tile = 0;                                                        \
+            refresh_vaddr ^= (1 << 10);                                        \
+            attrib_base ^= (1 << 10);                                          \
+            tile_ptr = &PPU_MEM(refresh_vaddr);                                \
+            attrib_ptr = &PPU_MEM(attrib_base);                                \
+         }                                                                     \
+         attrib = *attrib_ptr++;                                               \
+      }                                                                        \
+      attrib_shift ^= 2;                                                       \
+      col_high = ((attrib >> attrib_shift) & 3) << 2;                          \
+   } while (0)
+
+   tile_count = 33;
+   if (x_tile & 1)
+   {
+      DRAW_BG_TILE_DIRECT();
+      x_tile++;
+      tile_count--;
+      ADVANCE_BG_ATTRIBUTE_DIRECT();
+   }
+
+   while (tile_count >= 2)
+   {
+      DRAW_BG_TILE_DIRECT();
+      DRAW_BG_TILE_DIRECT();
+      x_tile += 2;
+      tile_count -= 2;
+      if (tile_count)
+         ADVANCE_BG_ATTRIBUTE_DIRECT();
+   }
+   if (tile_count)
+      DRAW_BG_TILE_DIRECT();
+
+#undef ADVANCE_BG_ATTRIBUTE_DIRECT
+#undef DRAW_BG_TILE_DIRECT
+
+   if (ppu.bg_mask)
+   {
+      const uint8 *base_white = vid_dither_row(scanline, 0);
+      row[0] = base_white[ppu.palette[0]];
+      solid[0] = 0;
+   }
+}
+#endif
 
 /* OAM entry */
 typedef struct obj_s
@@ -1060,6 +1416,125 @@ static void ppu_renderoam(uint8 *vidbuf, int scanline)
    }
 }
 
+#ifdef PPU_DIRECT_1BIT
+static void ppu_renderoam_direct(uint8 *row, const uint8 *bg_solid,
+                                 int scanline)
+{
+   uint8 sprite_used[NES_SCREEN_WIDTH / 8];
+   memset(sprite_used, 0, sizeof(sprite_used));
+
+   if (false == ppu.obj_on)
+      return;
+
+   int total = oam_sl_count[scanline];
+   if (total > PPU_MAXSPRITE)
+   {
+      ppu.stat |= PPU_STATF_MAXSPRITE;
+      total = PPU_MAXSPRITE;
+   }
+
+   obj_t *sprites = (obj_t *) ppu.oam;
+   for (int i = 0; i < total; i++)
+   {
+      uint8 sprite_num = oam_sl_idx[scanline][i];
+      obj_t *sp = &sprites[sprite_num];
+      uint8 sprite_y = sp->y_loc + 1;
+      uint8 sprite_x = sp->x_loc;
+      uint8 tile_index = sp->tile;
+      uint8 attrib = sp->atr;
+      uint8 col_high = (attrib & 3) << 2;
+      int sprite_row = scanline - sprite_y;
+      bool check_strike = (sprite_num == 0) && (false == ppu.strikeflag);
+      uint8 pat1, pat2;
+
+#ifndef PPU_SPRITE_LIVE_CHR
+      if (!sprite_chr_dirty)
+      {
+         pat1 = oam_pat1[sprite_num][sprite_row];
+         pat2 = oam_pat2[sprite_num][sprite_row];
+      }
+      else
+#endif
+      {
+         int h = ppu.obj_height;
+         int src = (attrib & OAMF_VFLIP) ? (h - 1 - sprite_row) : sprite_row;
+         uint32 vram_adr;
+         if (16 == h)
+            vram_adr = ((tile_index & 1) << 12) | ((tile_index & 0xFE) << 4);
+         else
+            vram_adr = ppu.obj_base + ((uint32)tile_index << 4);
+         uint32 chr_off = (src > 7) ? (16u + (src & 7)) : (uint32)src;
+         uint8 *dp = &PPU_MEM(vram_adr + chr_off);
+         pat1 = dp[0];
+         pat2 = dp[8];
+      }
+
+      uint32 color = ((pat2 & 0xAA) << 8) | ((pat2 & 0x55) << 1)
+                     | ((pat1 & 0xAA) << 7) | (pat1 & 0x55);
+      if (0 == color)
+         continue;
+
+      uint8 colors[8];
+      if (0 == (attrib & OAMF_HFLIP))
+      {
+         colors[0] = (color >> 14) & 3;
+         colors[1] = (color >> 6) & 3;
+         colors[2] = (color >> 12) & 3;
+         colors[3] = (color >> 4) & 3;
+         colors[4] = (color >> 10) & 3;
+         colors[5] = (color >> 2) & 3;
+         colors[6] = (color >> 8) & 3;
+         colors[7] = color & 3;
+      }
+      else
+      {
+         colors[7] = (color >> 14) & 3;
+         colors[6] = (color >> 6) & 3;
+         colors[5] = (color >> 12) & 3;
+         colors[4] = (color >> 4) & 3;
+         colors[3] = (color >> 10) & 3;
+         colors[2] = (color >> 2) & 3;
+         colors[1] = (color >> 8) & 3;
+         colors[0] = color & 3;
+      }
+
+      const uint8 *white = vid_dither_row(scanline, sprite_x & 3);
+      for (int pixel = 0; pixel < 8; pixel++)
+      {
+         int x = (int)sprite_x + pixel;
+         if (0 == colors[pixel] || x >= NES_SCREEN_WIDTH)
+            continue;
+
+         uint8 mask = (uint8)(0x80u >> (x & 7));
+         int byte = x >> 3;
+         bool bg_here = (bg_solid[byte] & mask) != 0;
+
+         /* Preserve the existing core's strike coordinate convention. */
+         if (check_strike && bg_here)
+         {
+            ppu_setstrike(pixel);
+            check_strike = false;
+         }
+
+         if (sprite_used[byte] & mask)
+            continue;
+         sprite_used[byte] |= mask;
+
+         if ((attrib & OAMF_BEHIND) && bg_here)
+            continue;
+         if (ppu.obj_mask && x < 8)
+            continue;
+
+         if (white[ppu.palette[16 + col_high + colors[pixel]]]
+             & (0x80u >> pixel))
+            row[byte] |= mask;
+         else
+            row[byte] &= (uint8)~mask;
+      }
+   }
+}
+#endif
+
 /* Fake rendering a line */
 /* This is needed for sprite 0 hits when we're skipping drawing a frame */
 static void ppu_fakeoam(int scanline)
@@ -1193,6 +1668,19 @@ static void ppu_renderscanline(uint8_t *buf, int scanline, bool draw_flag)
       }
    }
 
+#ifdef PPU_DIRECT_1BIT
+   if (draw_flag && NULL == ppu.latchfunc && ppu.drawsprites
+       && diag_ppu_bg_enabled() && diag_ppu_sprites_enabled())
+   {
+      uint8 bg_solid[NES_SCREEN_WIDTH / 8];
+      uint8 *row = vid_direct_row(scanline);
+      ppu_renderbg_direct(row, bg_solid, scanline);
+      ppu_renderoam_direct(row, bg_solid, scanline);
+      direct_rendered_scanline = scanline;
+      return;
+   }
+#endif
+
 #ifndef DISABLE_PPU_BG
    if (draw_flag)
    {
@@ -1258,6 +1746,9 @@ void ppu_checknmi(void)
 
 void ppu_scanline(uint8_t *bmp, int scanline, bool draw_flag)
 {
+#ifdef PPU_DIRECT_1BIT
+   direct_rendered_scanline = -1;
+#endif
    if (scanline < 240)
    {
       /* Rebuild caches once per frame at scanline 0 */

@@ -26,6 +26,7 @@
 /* TODO: make this a generic ROM loading routine */
 
 #include <stdio.h>
+#include <stdint.h>
 #include <string.h>
 #include <noftypes.h>
 #include <nes_rom.h>
@@ -161,6 +162,44 @@ static int rom_loadrom(unsigned char **rom, rominfo_t *rominfo)
    rominfo->rom=*rom;
    *rom+=ROM_BANK_LENGTH*rominfo->rom_banks;
 
+#ifdef NES_PRG_PAGE_COPY
+   {
+      const int page_size = 0x1000;
+      const int page_count = rominfo->rom_banks * (ROM_BANK_LENGTH / page_size);
+#ifdef NES_PRG_CACHE_COLOR
+      const int page_stride = page_size + 32;
+#else
+      const int page_stride = page_size;
+#endif
+      uintptr_t aligned;
+      uint8 *storage;
+      int page;
+
+      rominfo->rom_pages = malloc((size_t)page_count * sizeof(*rominfo->rom_pages));
+      rominfo->rom_pages_storage = malloc((size_t)page_count * page_stride + 31);
+      if (NULL == rominfo->rom_pages || NULL == rominfo->rom_pages_storage)
+      {
+         free(rominfo->rom_pages);
+         free(rominfo->rom_pages_storage);
+         rominfo->rom_pages = NULL;
+         rominfo->rom_pages_storage = NULL;
+         gui_sendmsg(GUI_RED, "Could not allocate copied PRG pages");
+         return -1;
+      }
+
+      aligned = ((uintptr_t)rominfo->rom_pages_storage + 31u) & ~(uintptr_t)31u;
+      storage = (uint8 *)aligned;
+      for (page = 0; page < page_count; page++)
+      {
+         rominfo->rom_pages[page] = storage + page * page_stride;
+         memcpy(rominfo->rom_pages[page], rominfo->rom + page * page_size,
+                page_size);
+      }
+      log_printf("PRG page copy: pages=%d stride=%d base=%p\n",
+                 page_count, page_stride, (void *)storage);
+   }
+#endif
+
 
    /* If there's VROM, allocate and stuff it in */
    if (rominfo->vrom_banks)
@@ -190,6 +229,22 @@ static int rom_loadrom(unsigned char **rom, rominfo_t *rominfo)
    }
 
    return 0;
+}
+
+int rom_prg_page_index(rominfo_t *rominfo, const uint8 *address)
+{
+   int page;
+   int page_count = rominfo->rom_banks * (ROM_BANK_LENGTH / 0x1000);
+
+   if (NULL == rominfo->rom_pages)
+      return (int)(address - rominfo->rom) >> 12;
+
+   for (page = 0; page < page_count; page++)
+      if (address >= rominfo->rom_pages[page]
+          && address < rominfo->rom_pages[page] + 0x1000)
+         return page;
+
+   return -1;
 }
 
 /* If we've got a VS. system game, load in the palette, as well */
@@ -516,6 +571,8 @@ void rom_free(rominfo_t **rominfo)
 
    if ((*rominfo)->sram)
       free((*rominfo)->sram);
+   free((*rominfo)->rom_pages);
+   free((*rominfo)->rom_pages_storage);
 /*
    if ((*rominfo)->rom)
       free((*rominfo)->rom);

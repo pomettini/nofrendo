@@ -259,6 +259,65 @@ static int playdate_update(void *ud) {
                     pairs[15] >> 8, pairs[15] & 0xFF, (unsigned)counts[15]);
             }
 #endif
+#ifdef NES6502_STA_ABSY_PAGEFILL
+            {
+                uint32 batches = 0, iterations = 0;
+                nes6502_pagefill_stats_snapshot(&batches, &iterations);
+                pd->system->logToConsole(
+                    "[pagefill] batches=%u iterations=%u",
+                    (unsigned)batches, (unsigned)iterations);
+            }
+#endif
+#ifdef NES6502_DTCM_PAGEFILL_BLOCK
+            pd->system->logToConsole(
+                "[dtcmblock] native_batches=%u",
+                (unsigned)nes6502_dtcm_pagefill_native_batch_count());
+#endif
+#ifdef NES6502_DTCM_LOOKUP_BLOCK
+            pd->system->logToConsole(
+                "[dtcmlookup] native_calls=%u",
+                (unsigned)nes6502_dtcm_lookup_native_count());
+#endif
+#ifdef NES6502_PAD_SERIAL_LOOP
+            {
+                uint32 batches = 0, reads = 0, nonzero = 0;
+                nes6502_padloop_stats_snapshot(&batches, &reads, &nonzero);
+                pd->system->logToConsole(
+                    "[padloop] batches=%u reads=%u nonzero=%u",
+                    (unsigned)batches, (unsigned)reads, (unsigned)nonzero);
+            }
+#endif
+#ifdef NES6502_RESIDUAL_COPY_LOOPS
+            {
+                uint32 rb = 0, ri = 0, pb = 0, pi = 0;
+                nes6502_copyloop_stats_snapshot(&rb, &ri, &pb, &pi);
+                pd->system->logToConsole(
+                    "[copyloops] ram_batches=%u ram_iters=%u ppu_batches=%u ppu_iters=%u",
+                    (unsigned)rb, (unsigned)ri,
+                    (unsigned)pb, (unsigned)pi);
+            }
+#endif
+#ifdef NES6502_PCPROFILE
+            {
+                uint16 pcs[NES6502_PCPROFILE_TOP];
+                uint32 counts[NES6502_PCPROFILE_TOP];
+                uint32 total = 0;
+                nes6502_pc_profile_snapshot_top(pcs, counts, &total);
+                for (int base = 0; base < NES6502_PCPROFILE_TOP; base += 8) {
+                    char line[256];
+                    int used = snprintf(line, sizeof(line),
+                                        "[pcprof] total=%u rank=%d",
+                                        (unsigned)total, base + 1);
+                    for (int i = 0; i < 8 && used > 0
+                                      && used < (int)sizeof(line); i++) {
+                        used += snprintf(line + used, sizeof(line) - (size_t)used,
+                                         " %04X:%u", pcs[base + i],
+                                         (unsigned)counts[base + i]);
+                    }
+                    pd->system->logToConsole("%s", line);
+                }
+            }
+#endif
             const char *ferr = NULL;
             LCDFont *f = pd->graphics->loadFont(
                 "/System/Fonts/Asheville-Sans-14-Bold.pft", &ferr);
@@ -294,7 +353,17 @@ static int playdate_update(void *ud) {
     /* Emulate every frame fully so record/replay are frame-deterministic. Frameskip
        takes the approximate sprite-0-hit path (nes_ppu.c) on skipped frames, and
        Auto skip is real-time dependent, which desyncs a replay from its recording. */
+#ifdef PD_PLAYBENCH_FIXED_SKIP
+    if (skip_counter <= 0) {
+        draw = 1;
+        skip_counter = 1;
+    } else {
+        draw = 0;
+        skip_counter--;
+    }
+#else
     draw = 1;
+#endif
     (void)auto_mode;
 #else
     if (skip_counter <= 0) {
@@ -321,7 +390,9 @@ static int playdate_update(void *ud) {
     nes_renderframe(draw);
     diag_render_end();
     osd_getinput();
+    diag_audio_begin();
     sound_fill_buffer();
+    diag_audio_end();
     diag_frame_end();
 
 #ifdef PD_PLAYBENCH_ENABLED

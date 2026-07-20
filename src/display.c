@@ -33,23 +33,59 @@ static const uint8_t bayer4[4][4] = {
  * Output byte for 8 consecutive pixels p[0..7] (cols 0,1,2,3,0,1,2,3):
  *   byte = (w4[p[0]] & 0x80) | (w4[p[1]] & 0x40) | ... | (w4[p[7]] & 0x01)
  */
+#ifdef PPU_DIRECT_1BIT
+static uint8_t white4[4][4][256];
+#else
 static uint8_t white4[4][256];
+#endif
 
 /* Cached raw frame buffer pointer — stable for the app lifetime */
 static uint8_t *fb_data = NULL;
 
+static void ensure_framebuffer(void) {
+    if (!fb_data) {
+        fb_data = pd->graphics->getFrame();
+        memset(fb_data, 0x00, LCD_ROWSIZE * LCD_ROWS);
+    }
+}
+
+#ifdef PPU_DIRECT_1BIT
+/* Direct PPU path accessors. The returned row covers only the centred
+   256-pixel NES image; horizontal padding remains untouched. */
+uint8_t *vid_direct_row(int scanline) {
+    ensure_framebuffer();
+    int y = scanline + YOFFSET;
+    return fb_data + y * LCD_ROWSIZE + XOFFSET / 8;
+}
+
+const uint8_t *vid_dither_row(int scanline, int phase) {
+    return white4[(scanline + YOFFSET) & 3][phase & 3];
+}
+#endif
+
 /* Called by the PPU when it loads the colour palette */
 void vid_setpalette(rgb_t *pal) {
     for (int row = 0; row < 4; row++) {
-        for (int i = 0; i < 256; i++) {
-            uint8_t l = (uint8_t)((pal[i].r * 77 + pal[i].g * 150 + pal[i].b * 29) >> 8);
-            uint8_t w = 0;
-            for (int col = 0; col < 4; col++) {
-                /* Bayer threshold: scale 0–15 → 8, 24, 40 … 248 */
-                if (l >= ((bayer4[row][col] << 4) | 8))
-                    w |= (0x88u >> col);  /* sets bit(7-col) and bit(3-col) */
+#ifdef PPU_DIRECT_1BIT
+        for (int phase = 0; phase < 4; phase++) {
+#else
+        {
+            int phase = 0;
+#endif
+            for (int i = 0; i < 256; i++) {
+                uint8_t l = (uint8_t)((pal[i].r * 77 + pal[i].g * 150 + pal[i].b * 29) >> 8);
+                uint8_t w = 0;
+                for (int col = 0; col < 4; col++) {
+                    int screen_col = (phase + col) & 3;
+                    if (l >= ((bayer4[row][screen_col] << 4) | 8))
+                        w |= (0x88u >> col);
+                }
+#ifdef PPU_DIRECT_1BIT
+                white4[row][phase][i] = w;
+#else
+                white4[row][i] = w;
+#endif
             }
-            white4[row][i] = w;
         }
     }
 }
@@ -58,10 +94,7 @@ void vid_setpalette(rgb_t *pal) {
 void ppu_scanline_blit(uint8_t *bmp, int scanline, bool draw_flag) {
     /* One-time init regardless of draw_flag: skipped frames must show the
        last rendered frame, not an uninitialised (white) framebuffer. */
-    if (!fb_data) {
-        fb_data = pd->graphics->getFrame();
-        memset(fb_data, 0x00, LCD_ROWSIZE * LCD_ROWS);
-    }
+    ensure_framebuffer();
 
 #ifdef DISABLE_PPU_BLIT
     (void)bmp;
@@ -73,11 +106,20 @@ void ppu_scanline_blit(uint8_t *bmp, int scanline, bool draw_flag) {
     if (!draw_flag || scanline < 0 || scanline >= NES_SCREEN_HEIGHT)
         return;
 
+#ifdef PPU_DIRECT_1BIT
+    if (ppu_scanline_direct_rendered(scanline))
+        return;
+#endif
+
     bmp += 8;  /* skip 8-pixel left overdraw */
 
     int y = scanline + YOFFSET;
     uint8_t *row = fb_data + y * LCD_ROWSIZE + XOFFSET / 8;
+#ifdef PPU_DIRECT_1BIT
+    const uint8_t *w4 = white4[y & 3][0];
+#else
     const uint8_t *w4 = white4[y & 3];
+#endif
 
     /* 32 bytes = 256 pixels, 8 per byte; 1 = white on Playdate (MSB first).
        Each iteration: 8 LUT lookups + 7 OR + 8 AND — no branches. */

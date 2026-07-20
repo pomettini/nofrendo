@@ -194,6 +194,56 @@ extern void nes6502_pair_profile_snapshot_top(
     uint32 counts[NES6502_PAIRPROFILE_TOP], uint32 *total, uint32 *dropped);
 #endif
 
+#ifdef NES6502_PCPROFILE
+#define NES6502_PCPROFILE_TOP 32
+extern void nes6502_pc_profile_reset(void);
+extern void nes6502_pc_profile_snapshot_top(
+    uint16 pcs[NES6502_PCPROFILE_TOP],
+    uint32 counts[NES6502_PCPROFILE_TOP], uint32 *total);
+#endif
+
+#ifdef NES6502_STA_ABSY_PAGEFILL
+extern void nes6502_pagefill_stats_reset(void);
+extern void nes6502_pagefill_stats_snapshot(uint32 *batches, uint32 *iterations);
+#endif
+
+#if defined(NES6502_DTCM_PAGEFILL_BLOCK) || defined(NES6502_DTCM_LOOKUP_BLOCK)
+typedef struct nes6502_dtcm_block_status_s
+{
+    uint32 status;
+    uint32 ready;
+    uint32 source;
+    uint32 dest;
+    uint32 size;
+} nes6502_dtcm_block_status_t;
+#endif
+
+#ifdef NES6502_DTCM_PAGEFILL_BLOCK
+extern void nes6502_dtcm_pagefill_init(void (*clear_icache)(void));
+extern void nes6502_dtcm_pagefill_get_status(nes6502_dtcm_block_status_t *status);
+extern uint32 nes6502_dtcm_pagefill_native_batch_count(void);
+#endif
+
+#ifdef NES6502_DTCM_LOOKUP_BLOCK
+extern void nes6502_dtcm_lookup_init(void (*clear_icache)(void));
+extern void nes6502_dtcm_lookup_get_status(nes6502_dtcm_block_status_t *status);
+extern void nes6502_dtcm_lookup_stats_reset(void);
+extern uint32 nes6502_dtcm_lookup_native_count(void);
+#endif
+
+#ifdef NES6502_PAD_SERIAL_LOOP
+extern void nes6502_padloop_stats_reset(void);
+extern void nes6502_padloop_stats_snapshot(
+    uint32 *batches, uint32 *reads, uint32 *nonzero);
+#endif
+
+#ifdef NES6502_RESIDUAL_COPY_LOOPS
+extern void nes6502_copyloop_stats_reset(void);
+extern void nes6502_copyloop_stats_snapshot(
+    uint32 *ram_batches, uint32 *ram_iterations,
+    uint32 *ppu_batches, uint32 *ppu_iterations);
+#endif
+
 #ifdef NES6502_PRGPROFILE
 extern void nes6502_prg_profile_reset(void);
 extern void nes6502_prg_profile_snapshot(uint32 counts[16], uint32 *total);

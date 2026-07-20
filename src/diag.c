@@ -231,11 +231,13 @@ extern PlaydateAPI *pd;
 static uint32_t window_start  = 0;
 #ifndef DIAG_FPS_ONLY
 static uint32_t render_start  = 0;
+static uint32_t audio_start   = 0;
 #ifdef DIAG_CPU_EXEC_TIMING
 static uint32_t cpu_exec_start = 0;
 static uint32_t frame_cpu_exec = 0;
 #endif
 static uint32_t render_accum  = 0;
+static uint32_t audio_accum   = 0;
 /* Split tracking: cpu_accum = render_false frames, ppu_accum = render_true frames */
 static uint32_t cpu_accum     = 0;
 static uint32_t ppu_accum     = 0;
@@ -457,6 +459,18 @@ void diag_render_end(void) {
 #endif
 }
 
+void diag_audio_begin(void) {
+#ifndef DIAG_FPS_ONLY
+    audio_start = pd->system->getCurrentTimeMilliseconds();
+#endif
+}
+
+void diag_audio_end(void) {
+#ifndef DIAG_FPS_ONLY
+    audio_accum += pd->system->getCurrentTimeMilliseconds() - audio_start;
+#endif
+}
+
 void diag_frame_end(void) {
     idx++;
     total++;
@@ -471,7 +485,7 @@ void diag_frame_end(void) {
     if (window_ms == 0) {
         pd->system->logToConsole("[diag] frame=%-5d fps=>1000", total);
 #ifndef DIAG_FPS_ONLY
-        render_accum = cpu_accum = ppu_accum = 0;
+        render_accum = audio_accum = cpu_accum = ppu_accum = 0;
 #ifdef DIAG_CPU_EXEC_TIMING
         cpu_exec_accum = ppu_exec_accum = 0;
 #endif
@@ -489,18 +503,19 @@ void diag_frame_end(void) {
 #else
     uint32_t avg_cpu  = cpu_count  ? cpu_accum  / cpu_count  : 0;
     uint32_t avg_ppu  = ppu_count  ? ppu_accum  / ppu_count  : 0;
+    uint32_t avg_audio = audio_accum / WINDOW;
 #ifdef DIAG_CPU_EXEC_TIMING
     uint32_t avg_cpu_exec = cpu_count ? cpu_exec_accum / cpu_count : 0;
     uint32_t avg_ppu_exec = ppu_count ? ppu_exec_accum / ppu_count : 0;
     uint32_t avg_cpu_misc = avg_cpu > avg_cpu_exec ? avg_cpu - avg_cpu_exec : 0;
 
     pd->system->logToConsole(
-        "[diag] frame=%-5d  fps=%3d  avg=%2dms  cpu_only=%2dms  cpu_exec=%2dms  cpu_misc=%2dms  ppu_full=%2dms  ppu_exec=%2dms",
-        total, fps, avg_ms, avg_cpu, avg_cpu_exec, avg_cpu_misc, avg_ppu, avg_ppu_exec);
+        "[diag] frame=%-5d  fps=%3d  avg=%2dms  cpu_only=%2dms  cpu_exec=%2dms  cpu_misc=%2dms  ppu_full=%2dms  ppu_exec=%2dms  audio=%2dms",
+        total, fps, avg_ms, avg_cpu, avg_cpu_exec, avg_cpu_misc, avg_ppu, avg_ppu_exec, avg_audio);
 #else
     pd->system->logToConsole(
-        "[diag] frame=%-5d  fps=%3d  avg=%2dms  cpu_only=%2dms  ppu_full=%2dms",
-        total, fps, avg_ms, avg_cpu, avg_ppu);
+        "[diag] frame=%-5d  fps=%3d  avg=%2dms  cpu_only=%2dms  ppu_full=%2dms  audio=%2dms",
+        total, fps, avg_ms, avg_cpu, avg_ppu, avg_audio);
 #endif
 #endif
 
@@ -524,7 +539,7 @@ void diag_frame_end(void) {
 #endif
 
 #ifndef DIAG_FPS_ONLY
-    render_accum = cpu_accum = ppu_accum = 0;
+    render_accum = audio_accum = cpu_accum = ppu_accum = 0;
 #ifdef DIAG_CPU_EXEC_TIMING
     cpu_exec_accum = ppu_exec_accum = 0;
 #endif

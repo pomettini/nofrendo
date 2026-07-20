@@ -263,6 +263,336 @@
 #define TRY_ZP_BEQ_SPIN()
 #endif
 
+/* Native multi-instruction milestone. The profiled fixed-bank routine at
+** $F756 performs a bounded lookup and returns; folding its tail removes up to
+** seventeen interpreter dispatches per call. The exact byte signature keeps
+** this safe for every other ROM and mapper, which simply takes the fallback. */
+#ifdef NES6502_DTCM_LOOKUP_BLOCK
+typedef uint8 (*nes6502_dtcm_read_fn)(uint32 address);
+typedef struct nes6502_dtcm_lookup_state_s
+{
+   uint32 a, y, s, pc;
+   uint32 n_flag, z_flag, c_flag;
+   uint32 cycles;
+   uint8 *ram;
+   uint8 **mem_page;
+   nes6502_dtcm_read_fn read_byte;
+} nes6502_dtcm_lookup_state_t;
+typedef void (*nes6502_dtcm_lookup_fn)(nes6502_dtcm_lookup_state_t *state);
+
+static nes6502_dtcm_lookup_fn nes6502_dtcm_lookup_ptr;
+static nes6502_dtcm_block_status_t nes6502_dtcm_lookup_status;
+static uint32 nes6502_dtcm_lookup_calls;
+static bool nes6502_dtcm_lookup_matches(const uint8 *code);
+
+#ifdef NES6502_PC_PTR
+#define TRY_DTCM_LOOKUP_BLOCK(done_label)                                    \
+{                                                                            \
+   if (__builtin_expect(PC == 0xF758u && remaining_cycles >= 48, 0)          \
+       && nes6502_dtcm_lookup_ptr != NULL                                    \
+       && nes6502_dtcm_lookup_matches(pc_ptr))                               \
+   {                                                                         \
+      nes6502_dtcm_lookup_state_t _lookup;                                   \
+      _lookup.a = A;                                                         \
+      _lookup.y = Y;                                                         \
+      _lookup.s = S;                                                         \
+      _lookup.n_flag = n_flag;                                               \
+      _lookup.z_flag = z_flag;                                               \
+      _lookup.c_flag = c_flag;                                               \
+      _lookup.ram = ram;                                                     \
+      _lookup.mem_page = cpu.mem_page;                                       \
+      _lookup.read_byte = mem_readbyte;                                      \
+      nes6502_dtcm_lookup_ptr(&_lookup);                                     \
+      A = _lookup.a;                                                         \
+      Y = _lookup.y;                                                         \
+      S = _lookup.s;                                                         \
+      n_flag = _lookup.n_flag;                                               \
+      z_flag = _lookup.z_flag;                                               \
+      c_flag = _lookup.c_flag;                                               \
+      PC = _lookup.pc;                                                       \
+      PC_REBASE();                                                           \
+      ADD_CYCLES((int)_lookup.cycles);                                       \
+      nes6502_dtcm_lookup_calls++;                                           \
+      goto done_label;                                                       \
+   }                                                                         \
+}
+#else
+#define TRY_DTCM_LOOKUP_BLOCK(done_label)
+#endif
+#else
+#define TRY_DTCM_LOOKUP_BLOCK(done_label)
+#endif
+
+/* Profile-directed RAM page-fill superinstruction. Kirby's post-spin PC
+** profile is dominated by this exact, fixed-bank loop shape:
+**
+**   STA page,Y; STA page+1,Y; INY; INY; INY; INY; BNE loop
+**
+** Only direct NES work-RAM pages are eligible, so no mapper, PPU, or APU side
+** effects can occur between the folded instructions. Batch only complete loop
+** iterations that fit before the ordinary execute-slice edge; if the complete
+** fill fits, retain the final not-taken branch's one-cycle saving. */
+#ifdef NES6502_DTCM_PAGEFILL_BLOCK
+#define RUN_PAGEFILL_BATCH(base_, batch_, complete_)                          \
+{                                                                            \
+   if ((complete_) && nes6502_dtcm_pagefill_ptr != NULL)                     \
+   {                                                                         \
+      Y = (uint8) nes6502_dtcm_pagefill_ptr(A, Y, ram + (base_));             \
+      nes6502_dtcm_pagefill_native_batches++;                                 \
+   }                                                                         \
+   else                                                                      \
+   {                                                                         \
+      uint32 _fill_run_count = (batch_);                                      \
+      do                                                                     \
+      {                                                                      \
+         ram[(base_) + Y] = A;                                               \
+         ram[(base_) + (uint8) (Y + 1)] = A;                                 \
+         Y = (uint8) (Y + 4);                                                \
+      } while (--_fill_run_count);                                           \
+   }                                                                         \
+}
+#else
+#define RUN_PAGEFILL_BATCH(base_, batch_, complete_)                         \
+{                                                                            \
+   uint32 _fill_run_count = (batch_);                                         \
+   do                                                                        \
+   {                                                                         \
+      ram[(base_) + Y] = A;                                                  \
+      ram[(base_) + (uint8) (Y + 1)] = A;                                    \
+      Y = (uint8) (Y + 4);                                                   \
+   } while (--_fill_run_count);                                              \
+}
+#endif
+
+#if defined(NES6502_STA_ABSY_PAGEFILL) && defined(NES6502_PC_PTR) \
+    && defined(NES6502_SWITCH)
+#define TRY_STA_ABSY_PAGEFILL(done_label)                                    \
+{                                                                            \
+   if (__builtin_expect((pc_bank_end - pc_ptr) >= 11, 1)                     \
+       && pc_ptr[2] == 0x99                                                   \
+       && pc_ptr[3] == (uint8) (pc_ptr[0] + 1)                               \
+       && pc_ptr[4] == pc_ptr[1]                                             \
+       && pc_ptr[5] == 0xC8 && pc_ptr[6] == 0xC8                             \
+       && pc_ptr[7] == 0xC8 && pc_ptr[8] == 0xC8                             \
+       && pc_ptr[9] == 0xD0 && pc_ptr[10] == 0xF4                            \
+       && (Y & 3) == 0)                                                      \
+   {                                                                         \
+      uint32 _fill_base = (uint32) pc_ptr[0] | ((uint32) pc_ptr[1] << 8);    \
+      if ((_fill_base & 0xFF) == 0 && _fill_base < 0x800)                    \
+      {                                                                      \
+         uint32 _fill_left = (256u - (uint32) Y) >> 2;                       \
+         int _fill_complete_cycles = (int) (_fill_left * 21u) - 1;           \
+         uint32 _fill_batch;                                                  \
+         int _fill_complete;                                                  \
+         if (remaining_cycles >= _fill_complete_cycles)                      \
+         {                                                                   \
+            _fill_batch = _fill_left;                                         \
+            _fill_complete = 1;                                               \
+         }                                                                   \
+         else                                                                \
+         {                                                                   \
+            _fill_batch = (uint32) ((remaining_cycles - 1) / 21);             \
+            _fill_complete = 0;                                               \
+         }                                                                   \
+         if (_fill_batch > 0)                                                 \
+         {                                                                   \
+            RUN_PAGEFILL_BATCH(_fill_base, _fill_batch, _fill_complete);      \
+            SET_NZ_FLAGS(Y);                                                  \
+            nes6502_pagefill_batches++;                                       \
+            nes6502_pagefill_iterations += _fill_batch;                       \
+            if (_fill_complete)                                               \
+            {                                                                \
+               pc_ptr += 11;                                                  \
+               PC += 11;                                                      \
+               ADD_CYCLES(_fill_complete_cycles);                             \
+            }                                                                \
+            else                                                             \
+            {                                                                \
+               PC_DEC_1();                                                    \
+               ADD_CYCLES((int) (_fill_batch * 21u));                         \
+            }                                                                \
+            goto done_label;                                                  \
+         }                                                                   \
+      }                                                                      \
+   }                                                                         \
+}
+#else
+#define TRY_STA_ABSY_PAGEFILL(done_label)
+#endif
+
+/* Profile-directed controller serial-loop superinstruction. The signature is
+** deliberately exact and requires the direct $4016/$4017 handler: every input
+** read still occurs, in order, while interpreter dispatch for the surrounding
+** AND/branch/accumulate/decrement sequence is removed. Only finish the loop
+** when its worst-case path fits in this execute slice. */
+#if defined(NES6502_PAD_SERIAL_LOOP) && defined(NES6502_PC_PTR) \
+    && defined(NES6502_SWITCH) && defined(NES6502_DIRECT_MEMIO)
+#define TRY_PAD_SERIAL_LOOP(done_label)                                      \
+{                                                                            \
+   if (__builtin_expect((pc_bank_end - pc_ptr) >= 27, 1)                     \
+       && pc_ptr[0] == 0x16 && pc_ptr[1] == 0x40                             \
+       && pc_ptr[2] == 0x29 && pc_ptr[3] == 0x03                             \
+       && pc_ptr[4] == 0xF0 && pc_ptr[5] == 0x07                             \
+       && pc_ptr[6] == 0xB9 && pc_ptr[7] == 0x24 && pc_ptr[8] == 0xC3        \
+       && pc_ptr[9] == 0x05 && pc_ptr[10] == 0x13                            \
+       && pc_ptr[11] == 0x85 && pc_ptr[12] == 0x13                           \
+       && pc_ptr[13] == 0x88                                                  \
+       && pc_ptr[14] == 0x10 && pc_ptr[15] == 0xEF                           \
+       && Y < 8 && X < 2                                                     \
+       && direct_read_4016_4017 != NULL)                                     \
+   {                                                                         \
+      uint32 _pad_reads = (uint32) Y + 1u;                                   \
+      int _pad_worst_cycles = (int) (_pad_reads * 23u) - 1;                  \
+      if (remaining_cycles >= _pad_worst_cycles)                             \
+      {                                                                      \
+         uint32 _pad_nonzero = 0;                                            \
+         int _pad_cycles = 0;                                                \
+         do                                                                  \
+         {                                                                   \
+            A = direct_read_4016_4017(0x4016u + X) & 3u;                     \
+            _pad_cycles += 6; /* LDA abs,X + AND immediate */                \
+            if (A == 0)                                                      \
+            {                                                                \
+               _pad_cycles += 3; /* taken BEQ */                             \
+            }                                                                \
+            else                                                             \
+            {                                                                \
+               _pad_cycles += 2; /* not-taken BEQ */                         \
+               A = pc_ptr[0x13 + Y];                                         \
+               A |= ram[0x13];                                               \
+               ram[0x13] = A;                                                \
+               _pad_cycles += 10; /* LDA abs,Y + ORA zp + STA zp */          \
+               _pad_nonzero++;                                               \
+            }                                                                \
+            Y--;                                                             \
+            _pad_cycles += 2; /* DEY */                                      \
+            _pad_cycles += (Y & 0x80) ? 2 : 3; /* final/not-final BPL */      \
+         } while (Y != 0xFF);                                                \
+         SET_NZ_FLAGS(Y);                                                     \
+         nes6502_padloop_batches++;                                          \
+         nes6502_padloop_reads += _pad_reads;                                \
+         nes6502_padloop_nonzero += _pad_nonzero;                            \
+         pc_ptr += 16;                                                        \
+         PC += 16;                                                           \
+         ADD_CYCLES(_pad_cycles);                                            \
+         goto done_label;                                                     \
+      }                                                                      \
+   }                                                                         \
+}
+#else
+#define TRY_PAD_SERIAL_LOOP(done_label)
+#endif
+
+/* Residual fixed-bank loops selected after page-fill and controller fusion.
+** The first copies bytes from ($16),Y to internal RAM $0400,X. The second
+** streams internal RAM $0400,X to PPU DATA. Pattern guards keep both generic
+** interpreter fallbacks available for every other use of these opcodes. */
+#if defined(NES6502_RESIDUAL_COPY_LOOPS) && defined(NES6502_PC_PTR) \
+    && defined(NES6502_SWITCH)
+#define TRY_INDY_RAM_COPY_LOOP(done_label)                                   \
+{                                                                            \
+   if (__builtin_expect((pc_bank_end - pc_ptr) >= 10, 1)                     \
+       && pc_ptr[0] == 0x16                                                   \
+       && pc_ptr[1] == 0x9D && pc_ptr[2] == 0x00 && pc_ptr[3] == 0x04        \
+       && pc_ptr[4] == 0xE8 && pc_ptr[5] == 0xC8                             \
+       && pc_ptr[6] == 0xC4 && pc_ptr[7] == 0x01                             \
+       && pc_ptr[8] == 0x90 && pc_ptr[9] == 0xF5)                            \
+   {                                                                         \
+      uint8 _copy_limit = ram[0x01];                                         \
+      uint8 _copy_probe_y = Y;                                               \
+      uint32 _copy_count = 0;                                                \
+      do                                                                     \
+      {                                                                      \
+         _copy_probe_y++;                                                    \
+         _copy_count++;                                                      \
+      } while (_copy_probe_y < _copy_limit);                                 \
+      if (remaining_cycles >= (int) (_copy_count * 21u) - 1)                 \
+      {                                                                      \
+         uint32 _copy_left = _copy_count;                                    \
+         uint32 _copy_ptr = zp_readword(0x16);                               \
+         int _copy_cycles = 0;                                               \
+         do                                                                  \
+         {                                                                   \
+            uint32 _copy_addr = (_copy_ptr + Y) & 0xFFFF;                    \
+            A = mem_readbyte(_copy_addr);                                    \
+            _copy_cycles += 5 + (Y > (uint8) _copy_addr);                    \
+            ram[0x400u + X] = A;                                             \
+            X++;                                                             \
+            Y++;                                                             \
+            _copy_cycles += 12; /* STA abs,X + INX + INY + CPY zp */         \
+            _copy_cycles += (Y < _copy_limit) ? 3 : 2;                       \
+         } while (--_copy_left);                                             \
+         _COMPARE(Y, _copy_limit);                                           \
+         nes6502_copyloop_ram_batches++;                                     \
+         nes6502_copyloop_ram_iterations += _copy_count;                     \
+         pc_ptr += 10;                                                        \
+         PC += 10;                                                           \
+         ADD_CYCLES(_copy_cycles);                                           \
+         goto done_label;                                                     \
+      }                                                                      \
+   }                                                                         \
+}
+#else
+#define TRY_INDY_RAM_COPY_LOOP(done_label)
+#endif
+
+#if defined(NES6502_RESIDUAL_COPY_LOOPS) && defined(NES6502_PC_PTR) \
+    && defined(NES6502_SWITCH) && defined(NES6502_DIRECT_MEMIO)
+#define TRY_RAM_PPU_STREAM_LOOP(done_label)                                  \
+{                                                                            \
+   if (__builtin_expect((pc_bank_end - pc_ptr) >= 9, 1)                      \
+       && pc_ptr[0] == 0x00 && pc_ptr[1] == 0x04                             \
+       && pc_ptr[2] == 0x8D && pc_ptr[3] == 0x07 && pc_ptr[4] == 0x20        \
+       && pc_ptr[5] == 0xE8 && pc_ptr[6] == 0x88                             \
+       && pc_ptr[7] == 0xD0 && pc_ptr[8] == 0xF6                             \
+       && direct_write_2000_3fff != NULL)                                    \
+   {                                                                         \
+      uint32 _stream_left = Y ? (uint32) Y : 256u;                           \
+      int _stream_complete_cycles = (int) (_stream_left * 15u) - 1;          \
+      uint32 _stream_batch;                                                   \
+      int _stream_complete;                                                   \
+      if (remaining_cycles >= _stream_complete_cycles)                       \
+      {                                                                      \
+         _stream_batch = _stream_left;                                        \
+         _stream_complete = 1;                                                \
+      }                                                                      \
+      else                                                                   \
+      {                                                                      \
+         _stream_batch = (uint32) ((remaining_cycles - 1) / 15);              \
+         _stream_complete = 0;                                                \
+      }                                                                      \
+      if (_stream_batch > 0)                                                  \
+      {                                                                      \
+         uint32 _stream_count = _stream_batch;                                \
+         do                                                                  \
+         {                                                                   \
+            A = ram[0x400u + X];                                             \
+            direct_write_2000_3fff(0x2007, A);                               \
+            X++;                                                             \
+            Y--;                                                             \
+         } while (--_stream_count);                                          \
+         SET_NZ_FLAGS(Y);                                                     \
+         nes6502_copyloop_ppu_batches++;                                     \
+         nes6502_copyloop_ppu_iterations += _stream_batch;                   \
+         if (_stream_complete)                                                \
+         {                                                                   \
+            pc_ptr += 9;                                                      \
+            PC += 9;                                                         \
+            ADD_CYCLES(_stream_complete_cycles);                              \
+         }                                                                   \
+         else                                                                \
+         {                                                                   \
+            PC_DEC_1();                                                       \
+            ADD_CYCLES((int) (_stream_batch * 15u));                          \
+         }                                                                   \
+         goto done_label;                                                     \
+      }                                                                      \
+   }                                                                         \
+}
+#else
+#define TRY_RAM_PPU_STREAM_LOOP(done_label)
+#endif
+
 #if defined(NES6502_HOTOPS) || defined(NES6502_FAST_BRANCHES) || defined(NES6502_FAST_BNE) || defined(NES6502_FAST_BPL) || defined(NES6502_FAST_BEQ)
 #define FAST_RELATIVE_BRANCH(condition) \
 { \
@@ -1062,6 +1392,24 @@
 }
 #endif /* !NES6502_TESTOPS */
 
+#if defined(NES6502_FAST_JMP_INDIRECT) && defined(NES6502_PC_PTR) \
+    && defined(HOST_LITTLE_ENDIAN)
+#define JMP_INDIRECT() \
+{ \
+   if (__builtin_expect((pc_bank_end - pc_ptr) >= 2, 1)) \
+      temp = (uint32) (*(uint16 *) pc_ptr); \
+   else \
+      temp = bank_readword(PC); \
+   /* NMOS 6502 wraps the high-byte read within the pointer page. */ \
+   if (0xFF == (temp & 0xFF)) { \
+      PC = (bank_readbyte(temp & 0xFF00) << 8) | bank_readbyte(temp); \
+      PC_REBASE(); \
+   } else { \
+      JUMP(temp); \
+   } \
+   ADD_CYCLES(5); \
+}
+#else
 #define JMP_INDIRECT() \
 { \
    temp = bank_readword(PC); \
@@ -1074,6 +1422,7 @@
    } \
    ADD_CYCLES(5); \
 }
+#endif
 
 #ifdef NES6502_JMP_SPIN
 #ifdef NES6502_FAST_PC_OPS
@@ -1559,6 +1908,292 @@
 /* ITCM-relocated execute pointer — NULL until nes6502_itcm_init() sets it up */
 int (*nes6502_execute_ptr)(int total_cycles) = NULL;
 
+#ifdef NES6502_DTCM_PAGEFILL_BLOCK
+#define NES6502_DTCM_BLOCK_DEST 0x20007D00u
+#define NES6502_DTCM_BLOCK_MAX_BYTES 256u
+
+#if defined(__ELF__)
+#define NES6502_JITBLOCK __attribute__((section(".jitblock.pagefill"), noinline, used))
+#else
+#define NES6502_JITBLOCK __attribute__((noinline, used))
+#endif
+
+typedef uint32 (*nes6502_dtcm_pagefill_fn)(uint32 a, uint32 y, uint8 *page);
+static nes6502_dtcm_pagefill_fn nes6502_dtcm_pagefill_ptr;
+static nes6502_dtcm_block_status_t nes6502_dtcm_pagefill_status;
+static uint32 nes6502_dtcm_pagefill_native_batches;
+
+/* Relocation-free native template. It has no global references or outbound
+** calls, so the exact linked bytes can execute from uncached DTCM. */
+static uint32 NES6502_JITBLOCK
+nes6502_dtcm_pagefill_template(uint32 a, uint32 y, uint8 *page)
+{
+   do
+   {
+      page[(uint8)y] = (uint8)a;
+      page[(uint8)(y + 1)] = (uint8)a;
+      y = (uint8)(y + 4);
+   } while (y != 0);
+   return y;
+}
+
+void nes6502_dtcm_pagefill_init(void (*clear_icache)(void))
+{
+   memset(&nes6502_dtcm_pagefill_status, 0,
+          sizeof(nes6502_dtcm_pagefill_status));
+   nes6502_dtcm_pagefill_ptr = NULL;
+
+#if defined(__ELF__) && defined(TARGET_PLAYDATE)
+   extern char __jitblock_start[], __jitblock_end[];
+   uintptr_t source = (uintptr_t)__jitblock_start;
+   uintptr_t end = (uintptr_t)__jitblock_end;
+   uintptr_t size = end - source;
+   uintptr_t dest = NES6502_DTCM_BLOCK_DEST;
+   uintptr_t entry = ((uintptr_t)nes6502_dtcm_pagefill_template & ~1u) - source;
+   const uint32 *src = (const uint32 *)source;
+   volatile uint32 *dst = (volatile uint32 *)dest;
+   uint32 i;
+
+   nes6502_dtcm_pagefill_status.source = (uint32)source;
+   nes6502_dtcm_pagefill_status.dest = (uint32)dest;
+   nes6502_dtcm_pagefill_status.size = (uint32)size;
+   if (size == 0 || size > NES6502_DTCM_BLOCK_MAX_BYTES || (size & 3u) != 0
+       || (dest + size) > 0x200095a8u || entry >= size)
+   {
+      nes6502_dtcm_pagefill_status.status = 1;
+      return;
+   }
+
+   for (i = 0; i < (uint32)(size / 4u); i++)
+      dst[i] = src[i];
+   __asm volatile ("dsb sy\n\t" ::: "memory");
+   if (clear_icache)
+      clear_icache();
+   __asm volatile ("dsb sy\n\t" "isb sy\n\t" ::: "memory");
+
+   nes6502_dtcm_pagefill_ptr =
+       (nes6502_dtcm_pagefill_fn)(dest + entry + 1u);
+   nes6502_dtcm_pagefill_status.ready = 1;
+#else
+   (void)clear_icache;
+   nes6502_dtcm_pagefill_ptr = nes6502_dtcm_pagefill_template;
+   nes6502_dtcm_pagefill_status.source =
+       (uint32)(uintptr_t)nes6502_dtcm_pagefill_template;
+   nes6502_dtcm_pagefill_status.ready = 1;
+#endif
+}
+
+void nes6502_dtcm_pagefill_get_status(nes6502_dtcm_block_status_t *status)
+{
+   if (status)
+      *status = nes6502_dtcm_pagefill_status;
+}
+#endif
+
+#ifdef NES6502_DTCM_LOOKUP_BLOCK
+#define NES6502_DTCM_LOOKUP_DEST 0x20007D00u
+#define NES6502_DTCM_LOOKUP_MAX_BYTES 1024u
+
+#if defined(__ELF__)
+#define NES6502_LOOKUP_JITBLOCK \
+   __attribute__((section(".jitblock.lookup"), noinline, used))
+#else
+#define NES6502_LOOKUP_JITBLOCK __attribute__((noinline, used))
+#endif
+
+/* This routine is copied verbatim to DTCM. It has no global references and
+** reaches emulator memory only through pointers supplied in the state block,
+** so the linked bytes are position-independent without runtime relocations. */
+static void NES6502_LOOKUP_JITBLOCK
+nes6502_dtcm_lookup_template(nes6502_dtcm_lookup_state_t *state)
+{
+   uint32 a = state->a;
+   uint32 y = state->y;
+   uint32 s = state->s;
+   uint32 n = state->n_flag;
+   uint32 z = state->z_flag;
+   uint32 c = state->c_flag;
+   uint32 cycles = 0;
+   uint32 diff, base, addr;
+   uint8 *work_ram = state->ram;
+
+   /* CMP #$68; BCC failure */
+   diff = a - 0x68u;
+   c = a >= 0x68u;
+   n = z = (uint8)diff;
+   cycles += 2;
+   if (!c)
+   {
+      cycles += 3;
+      goto failure;
+   }
+   cycles += 2;
+
+   /* CMP #$74; BCS failure */
+   diff = a - 0x74u;
+   c = a >= 0x74u;
+   n = z = (uint8)diff;
+   cycles += 2;
+   if (c)
+   {
+      cycles += 3;
+      goto failure;
+   }
+   cycles += 2;
+
+   /* LDA ($16),Y; TAY */
+   base = (uint32)work_ram[0x16] | ((uint32)work_ram[0x17] << 8);
+   addr = (base + y) & 0xFFFFu;
+   cycles += 5u + (y > (uint8)addr);
+   a = state->read_byte(addr);
+   n = z = (uint8)a;
+   y = (uint8)a;
+   n = z = (uint8)y;
+   cycles += 2;
+
+   /* LDA $7F00,Y; CMP #$7F; BCS failure */
+   a = state->read_byte(0x7F00u + y);
+   n = z = (uint8)a;
+   cycles += 4;
+   diff = a - 0x7Fu;
+   c = a >= 0x7Fu;
+   n = z = (uint8)diff;
+   cycles += 2;
+   if (c)
+   {
+      cycles += 3;
+      goto failure;
+   }
+   cycles += 2;
+
+   /* TAY; LDA $F777,Y; PHA; LSR A; TAY; PLA */
+   y = (uint8)a;
+   n = z = (uint8)y;
+   cycles += 2;
+   addr = 0xF777u + y;
+   cycles += 4u + (y > (uint8)addr);
+   a = state->mem_page[addr >> NES6502_BANKSHIFT]
+                      [addr & NES6502_BANKMASK];
+   n = z = (uint8)a;
+   work_ram[0x100u + (uint8)s] = (uint8)a;
+   s = (uint8)(s - 1u);
+   cycles += 3;
+   c = a & 1u;
+   a = (uint8)(a >> 1);
+   n = z = (uint8)a;
+   cycles += 2;
+   y = (uint8)a;
+   n = z = (uint8)y;
+   cycles += 2;
+   s = (uint8)(s + 1u);
+   a = work_ram[0x100u + (uint8)s];
+   cycles += 4;
+   goto rts;
+
+failure:
+   /* LDA #$00; TAY */
+   a = 0;
+   n = z = 0;
+   cycles += 2;
+   y = 0;
+   n = z = 0;
+   cycles += 2;
+
+rts:
+   /* RTS: pull low/high return address, then increment. */
+   s = (uint8)(s + 1u);
+   addr = work_ram[0x100u + (uint8)s];
+   s = (uint8)(s + 1u);
+   addr |= (uint32)work_ram[0x100u + (uint8)s] << 8;
+   state->pc = (addr + 1u) & 0xFFFFu;
+   cycles += 6;
+
+   state->a = (uint8)a;
+   state->y = (uint8)y;
+   state->s = (uint8)s;
+   state->n_flag = n;
+   state->z_flag = z;
+   state->c_flag = c;
+   state->cycles = cycles;
+}
+
+static bool __attribute__((noinline))
+nes6502_dtcm_lookup_matches(const uint8 *code)
+{
+   static const uint8 signature[31] =
+   {
+      0xC9, 0x68, 0x90, 0x17, 0xC9, 0x74, 0xB0, 0x13,
+      0xB1, 0x16, 0xA8, 0xB9, 0x00, 0x7F, 0xC9, 0x7F,
+      0xB0, 0x09, 0xA8, 0xB9, 0x77, 0xF7, 0x48, 0x4A,
+      0xA8, 0x68, 0x60, 0xA9, 0x00, 0xA8, 0x60
+   };
+   return 0 == memcmp(code, signature, sizeof(signature));
+}
+
+void nes6502_dtcm_lookup_init(void (*clear_icache)(void))
+{
+   memset(&nes6502_dtcm_lookup_status, 0,
+          sizeof(nes6502_dtcm_lookup_status));
+   nes6502_dtcm_lookup_ptr = NULL;
+   nes6502_dtcm_lookup_calls = 0;
+
+#if defined(__ELF__) && defined(TARGET_PLAYDATE)
+   extern char __jitblock_start[], __jitblock_end[];
+   uintptr_t source = (uintptr_t)__jitblock_start;
+   uintptr_t end = (uintptr_t)__jitblock_end;
+   uintptr_t size = end - source;
+   uintptr_t dest = NES6502_DTCM_LOOKUP_DEST;
+   uintptr_t entry = ((uintptr_t)nes6502_dtcm_lookup_template & ~1u) - source;
+   const uint32 *src = (const uint32 *)source;
+   volatile uint32 *dst = (volatile uint32 *)dest;
+   uint32 i;
+
+   nes6502_dtcm_lookup_status.source = (uint32)source;
+   nes6502_dtcm_lookup_status.dest = (uint32)dest;
+   nes6502_dtcm_lookup_status.size = (uint32)size;
+   if (size == 0 || size > NES6502_DTCM_LOOKUP_MAX_BYTES || (size & 3u) != 0
+       || (dest + size) > 0x200095A8u || entry >= size)
+   {
+      nes6502_dtcm_lookup_status.status = 1;
+      return;
+   }
+
+   for (i = 0; i < (uint32)(size / 4u); i++)
+      dst[i] = src[i];
+   __asm volatile ("dsb sy\n\t" ::: "memory");
+   if (clear_icache)
+      clear_icache();
+   __asm volatile ("dsb sy\n\t" "isb sy\n\t" ::: "memory");
+
+   nes6502_dtcm_lookup_ptr =
+       (nes6502_dtcm_lookup_fn)(dest + entry + 1u);
+   nes6502_dtcm_lookup_status.ready = 1;
+#else
+   (void)clear_icache;
+   nes6502_dtcm_lookup_ptr = nes6502_dtcm_lookup_template;
+   nes6502_dtcm_lookup_status.source =
+       (uint32)(uintptr_t)nes6502_dtcm_lookup_template;
+   nes6502_dtcm_lookup_status.ready = 1;
+#endif
+}
+
+void nes6502_dtcm_lookup_get_status(nes6502_dtcm_block_status_t *status)
+{
+   if (status)
+      *status = nes6502_dtcm_lookup_status;
+}
+
+void nes6502_dtcm_lookup_stats_reset(void)
+{
+   nes6502_dtcm_lookup_calls = 0;
+}
+
+uint32 nes6502_dtcm_lookup_native_count(void)
+{
+   return nes6502_dtcm_lookup_calls;
+}
+#endif
+
 #if defined(NES6502_TCMHOT_PROBE) || defined(NES6502_TCMHOT_CORE)
 #if defined(__ELF__)
 #define NES6502_TCMHOT __attribute__((section(".tcmhot"), noinline, used))
@@ -1709,6 +2344,42 @@ static int lazy_cycle_released = 0;
 /* memory region pointers */
 static uint8 *ram = NULL, *stack = NULL;
 static uint8 *null_page;
+
+#ifdef NES6502_DIRECT_CART_RAM
+/* Cartridge work RAM is normally a plain page mapping. Some mappers install
+** handlers in this range, though, so enable the direct path only when the
+** current handler tables prove that $6000-$7FFF has no side effects. */
+static int direct_cart_ram_read;
+static int direct_cart_ram_write;
+
+static void nes6502_refresh_direct_cart_ram(void)
+{
+   nes6502_memread *mr;
+   nes6502_memwrite *mw;
+
+   direct_cart_ram_read = 1;
+   for (mr = cpu.read_handler;
+        mr && mr->min_range != 0xFFFFFFFF; mr++)
+   {
+      if (mr->max_range >= 0x6000 && mr->min_range <= 0x7FFF)
+      {
+         direct_cart_ram_read = 0;
+         break;
+      }
+   }
+
+   direct_cart_ram_write = 1;
+   for (mw = cpu.write_handler;
+        mw && mw->min_range != 0xFFFFFFFF; mw++)
+   {
+      if (mw->max_range >= 0x6000 && mw->min_range <= 0x7FFF)
+      {
+         direct_cart_ram_write = 0;
+         break;
+      }
+   }
+}
+#endif
 
 #ifdef NES6502_DIRECT_MEMIO
 static uint8 (*direct_read_2000_3fff)(uint32 address) = NULL;
@@ -1888,6 +2559,127 @@ void nes6502_pair_profile_snapshot_top(
 #define PROFILE_PAIR(opcode) ((void) 0)
 #endif
 
+#ifdef NES6502_PCPROFILE
+static uint32 pc_profile_counts[65536];
+static uint32 pc_profile_total;
+
+#define PROFILE_PC(pc)                                                       \
+   do {                                                                      \
+      pc_profile_counts[(uint16)(pc)]++;                                     \
+      pc_profile_total++;                                                    \
+   } while (0)
+
+void nes6502_pc_profile_reset(void)
+{
+   memset(pc_profile_counts, 0, sizeof(pc_profile_counts));
+   pc_profile_total = 0;
+}
+
+void nes6502_pc_profile_snapshot_top(
+    uint16 pcs[NES6502_PCPROFILE_TOP],
+    uint32 counts[NES6502_PCPROFILE_TOP], uint32 *total)
+{
+   uint32 pc;
+   int pos;
+
+   memset(pcs, 0, sizeof(uint16) * NES6502_PCPROFILE_TOP);
+   memset(counts, 0, sizeof(uint32) * NES6502_PCPROFILE_TOP);
+   for (pc = 0; pc < 65536u; pc++)
+   {
+      uint32 count = pc_profile_counts[pc];
+      if (count <= counts[NES6502_PCPROFILE_TOP - 1])
+         continue;
+      pos = NES6502_PCPROFILE_TOP - 1;
+      while (pos > 0 && count > counts[pos - 1])
+      {
+         counts[pos] = counts[pos - 1];
+         pcs[pos] = pcs[pos - 1];
+         pos--;
+      }
+      counts[pos] = count;
+      pcs[pos] = (uint16)pc;
+   }
+   if (total)
+      *total = pc_profile_total;
+}
+#else
+#define PROFILE_PC(pc) ((void) 0)
+#endif
+
+#ifdef NES6502_STA_ABSY_PAGEFILL
+static uint32 nes6502_pagefill_batches;
+static uint32 nes6502_pagefill_iterations;
+
+void nes6502_pagefill_stats_reset(void)
+{
+   nes6502_pagefill_batches = 0;
+   nes6502_pagefill_iterations = 0;
+#ifdef NES6502_DTCM_PAGEFILL_BLOCK
+   nes6502_dtcm_pagefill_native_batches = 0;
+#endif
+}
+
+void nes6502_pagefill_stats_snapshot(uint32 *batches, uint32 *iterations)
+{
+   *batches = nes6502_pagefill_batches;
+   *iterations = nes6502_pagefill_iterations;
+}
+
+#ifdef NES6502_DTCM_PAGEFILL_BLOCK
+uint32 nes6502_dtcm_pagefill_native_batch_count(void)
+{
+   return nes6502_dtcm_pagefill_native_batches;
+}
+#endif
+#endif
+
+#ifdef NES6502_PAD_SERIAL_LOOP
+static uint32 nes6502_padloop_batches;
+static uint32 nes6502_padloop_reads;
+static uint32 nes6502_padloop_nonzero;
+
+void nes6502_padloop_stats_reset(void)
+{
+   nes6502_padloop_batches = 0;
+   nes6502_padloop_reads = 0;
+   nes6502_padloop_nonzero = 0;
+}
+
+void nes6502_padloop_stats_snapshot(uint32 *batches, uint32 *reads,
+                                    uint32 *nonzero)
+{
+   *batches = nes6502_padloop_batches;
+   *reads = nes6502_padloop_reads;
+   *nonzero = nes6502_padloop_nonzero;
+}
+#endif
+
+#ifdef NES6502_RESIDUAL_COPY_LOOPS
+static uint32 nes6502_copyloop_ram_batches;
+static uint32 nes6502_copyloop_ram_iterations;
+static uint32 nes6502_copyloop_ppu_batches;
+static uint32 nes6502_copyloop_ppu_iterations;
+
+void nes6502_copyloop_stats_reset(void)
+{
+   nes6502_copyloop_ram_batches = 0;
+   nes6502_copyloop_ram_iterations = 0;
+   nes6502_copyloop_ppu_batches = 0;
+   nes6502_copyloop_ppu_iterations = 0;
+}
+
+void nes6502_copyloop_stats_snapshot(uint32 *ram_batches,
+                                     uint32 *ram_iterations,
+                                     uint32 *ppu_batches,
+                                     uint32 *ppu_iterations)
+{
+   *ram_batches = nes6502_copyloop_ram_batches;
+   *ram_iterations = nes6502_copyloop_ram_iterations;
+   *ppu_batches = nes6502_copyloop_ppu_batches;
+   *ppu_iterations = nes6502_copyloop_ppu_iterations;
+}
+#endif
+
 #ifdef NES6502_PRGPROFILE
 /* Per-4KB-page execution histogram: counts instructions dispatched from each
    mem_page index (0-15). Pages 8-15 are PRG ROM ($8000-$FFFF). Tells us whether
@@ -1944,11 +2736,16 @@ INLINE uint32 bank_readword(register uint32 address)
       return (uint32) (*(uint16 *)(rom_linear_page8 + (address - 0x8000)));
 #endif
 
-   /* technically, this should fail if the address is $xFFF, but
-   ** any code that does this would be suspect anyway, as it would
-   ** be fetching a word across page boundaries, which only would
-   ** make sense if the banks were physically consecutive.
-   */
+#ifdef NES_PRG_PAGE_COPY
+   if (__builtin_expect((address & NES6502_BANKMASK) == NES6502_BANKMASK, 0))
+   {
+      uint32 next = (address + 1) & 0xFFFF;
+      return (uint32)cpu.mem_page[address >> NES6502_BANKSHIFT][NES6502_BANKMASK]
+           | ((uint32)cpu.mem_page[next >> NES6502_BANKSHIFT]
+                                  [next & NES6502_BANKMASK] << 8);
+   }
+#endif
+
    return (uint32) (*(uint16 *)(cpu.mem_page[address >> NES6502_BANKSHIFT] + (address & NES6502_BANKMASK)));
 }
 
@@ -1975,6 +2772,16 @@ INLINE uint32 bank_readword(register uint32 address)
       uint32 x = (uint32) *(uint16 *)(rom_linear_page8 + (address - 0x8000));
       return (x << 8) | (x >> 8);
 #endif
+   }
+#endif
+
+#ifdef NES_PRG_PAGE_COPY
+   if (__builtin_expect((address & NES6502_BANKMASK) == NES6502_BANKMASK, 0))
+   {
+      uint32 next = (address + 1) & 0xFFFF;
+      return (uint32)cpu.mem_page[address >> NES6502_BANKSHIFT][NES6502_BANKMASK]
+           | ((uint32)cpu.mem_page[next >> NES6502_BANKSHIFT]
+                                  [next & NES6502_BANKMASK] << 8);
    }
 #endif
 
@@ -2042,6 +2849,13 @@ static uint8 mem_readbyte(uint32 address)
    }
 #endif
 
+#ifdef NES6502_DIRECT_CART_RAM
+   /* Keep this after the common RAM/PPU/APU exits: only uncommon addresses
+      that would reach the generic handler scan pay the cartridge-range test. */
+   if (address >= 0x6000 && address < 0x8000 && direct_cart_ram_read)
+      return bank_readbyte(address);
+#endif
+
    /* I/O space: PPU, APU, mapper regs — check memory range handlers */
    for (mr = cpu.read_handler; mr->min_range != 0xFFFFFFFF; mr++)
    {
@@ -2104,6 +2918,15 @@ static void mem_writebyte(uint32 address, uint8 value)
          direct_write_4014_4017(address, value);
          return;
       }
+   }
+#endif
+
+#ifdef NES6502_DIRECT_CART_RAM
+   /* As with reads, do not perturb the common RAM/PPU/APU fast paths. */
+   if (address >= 0x6000 && address < 0x8000 && direct_cart_ram_write)
+   {
+      bank_writebyte(address, value);
+      return;
    }
 #endif
 
@@ -2187,6 +3010,9 @@ void nes6502_setcontext(nes6502_context *context)
 
    ram = cpu.mem_page[0];  /* quick zero-page/RAM references */
    stack = ram + STACK_OFFSET;
+#ifdef NES6502_DIRECT_CART_RAM
+   nes6502_refresh_direct_cart_ram();
+#endif
 #ifdef NES6502_DIRECT_MEMIO
    nes6502_refresh_direct_memio();
 #endif
@@ -2600,6 +3426,7 @@ static int nes6502_tcmhot_execute(int timeslice_cycles)
    if (__builtin_expect(pc_ptr >= pc_bank_end, 0)) PC_REBASE(); \
    _op = *pc_ptr++; \
    PC++; \
+   PROFILE_PC(PC - 1); \
    PROFILE_OPCODE(_op); \
    PROFILE_PAIR(_op); \
    goto *opcode_table[_op]; \
@@ -2608,6 +3435,7 @@ static int nes6502_tcmhot_execute(int timeslice_cycles)
 #define  OPCODE_FETCH_DISPATCH \
 { \
    uint8 _op = bank_readbyte(PC++); \
+   PROFILE_PC(PC - 1); \
    PROFILE_OPCODE(_op); \
    PROFILE_PAIR(_op); \
    goto *opcode_table[_op]; \
@@ -2789,12 +3617,14 @@ int nes6502_execute(int timeslice_cycles)
          if (__builtin_expect(pc_ptr >= pc_bank_end, 0)) PC_REBASE();
          _op = *pc_ptr++;
          PC++;
+         PROFILE_PC(PC - 1);
          PROFILE_OPCODE(_op);
          PROFILE_PAIR(_op);
          PROFILE_PRG_PAGE(PC);
          switch (_op)
          {
 #else
+      PROFILE_PC(PC);
       PROFILE_PRG_PAGE(PC);
       switch (bank_readbyte(PC++))
       {
@@ -2891,6 +3721,7 @@ chained_a5:
          OPCODE_END
 
       OPCODE_BEGIN(99)  /* STA $nnnn,Y */
+         TRY_STA_ABSY_PAGEFILL(sta_absy_pagefill_done);
 #if defined(NES6502_HOTOPS) || defined(NES6502_FAST_MEMOPS)
          FETCH_PC_WORD_DIRECT(addr);
          addr = (addr + Y) & 0xFFFF;
@@ -2899,6 +3730,7 @@ chained_a5:
 #else
          STA(5, ABS_IND_Y_ADDR, mem_writebyte, addr);
 #endif
+sta_absy_pagefill_done:
          OPCODE_END
 
       OPCODE_BEGIN(4A)  /* LSR A */
@@ -2939,6 +3771,8 @@ chained_a5:
          OPCODE_END
 
       OPCODE_BEGIN(BD)  /* LDA $nnnn,X */
+         TRY_PAD_SERIAL_LOOP(lda_absx_padloop_done);
+         TRY_RAM_PPU_STREAM_LOOP(lda_absx_padloop_done);
 #if defined(NES6502_HOTOPS) || defined(NES6502_FAST_MEMOPS)
          FETCH_PC_WORD_DIRECT(addr);
          addr = (addr + X) & 0xFFFF;
@@ -2949,6 +3783,7 @@ chained_a5:
 #else
          LDA(4, ABS_IND_X_BYTE_READ);
 #endif
+lda_absx_padloop_done:
          OPCODE_END
 #endif /* NES6502_HOT_CLUSTER */
 
@@ -3554,6 +4389,7 @@ chained_a5:
 
 #ifndef NES6502_HOT_CLUSTER
       OPCODE_BEGIN(99)  /* STA $nnnn,Y */
+         TRY_STA_ABSY_PAGEFILL(sta_absy_pagefill_done);
 #if defined(NES6502_HOTOPS) || defined(NES6502_FAST_MEMOPS)
          FETCH_PC_WORD_DIRECT(addr);
          addr = (addr + Y) & 0xFFFF;
@@ -3562,6 +4398,7 @@ chained_a5:
 #else
          STA(5, ABS_IND_Y_ADDR, mem_writebyte, addr);
 #endif
+sta_absy_pagefill_done:
          OPCODE_END
 #endif /* !NES6502_HOT_CLUSTER */
 
@@ -3622,8 +4459,10 @@ chained_a5:
 #else
          LDA(3, ZERO_PAGE_BYTE);
 #endif
+         TRY_DTCM_LOOKUP_BLOCK(lda_zp_dtcmlookup_done);
          TRY_ZP_BEQ_SPIN();
          TRY_CHAIN_F0();
+lda_zp_dtcmlookup_done:
          OPCODE_END
 #endif /* !NES6502_HOT_CLUSTER */
 
@@ -3683,7 +4522,9 @@ chained_a5:
          OPCODE_END
 
       OPCODE_BEGIN(B1)  /* LDA ($nn),Y */
+         TRY_INDY_RAM_COPY_LOOP(lda_indy_copyloop_done);
          LDA(5, INDIR_Y_BYTE_READ);
+lda_indy_copyloop_done:
          OPCODE_END
 
       OPCODE_BEGIN(B3)  /* LAX ($nn),Y */
@@ -3728,6 +4569,8 @@ chained_a5:
 
 #ifndef NES6502_HOT_CLUSTER
       OPCODE_BEGIN(BD)  /* LDA $nnnn,X */
+         TRY_PAD_SERIAL_LOOP(lda_absx_padloop_done);
+         TRY_RAM_PPU_STREAM_LOOP(lda_absx_padloop_done);
 #if defined(NES6502_HOTOPS) || defined(NES6502_FAST_MEMOPS)
          FETCH_PC_WORD_DIRECT(addr);
          addr = (addr + X) & 0xFFFF;
@@ -3738,6 +4581,7 @@ chained_a5:
 #else
          LDA(4, ABS_IND_X_BYTE_READ);
 #endif
+lda_absx_padloop_done:
          OPCODE_END
 #endif /* !NES6502_HOT_CLUSTER */
 

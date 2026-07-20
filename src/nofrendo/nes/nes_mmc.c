@@ -151,8 +151,9 @@ void mmc_bankrom(int size, uint32 address, int bank)
          bank = MMC_LAST8KROM;
       {
          int page = address >> NES6502_BANKSHIFT;
-         mmc_cpu.mem_page[page] = &mmc.cart->rom[(bank % MMC_8KROM) << 13];
-         mmc_cpu.mem_page[page + 1] = mmc_cpu.mem_page[page] + 0x1000;
+         int rom_page = (bank % MMC_8KROM) << 1;
+         mmc_cpu.mem_page[page] = rom_prg_page(mmc.cart, rom_page);
+         mmc_cpu.mem_page[page + 1] = rom_prg_page(mmc.cart, rom_page + 1);
       }
 
       break;
@@ -162,10 +163,11 @@ void mmc_bankrom(int size, uint32 address, int bank)
          bank = MMC_LAST16KROM;
       {
          int page = address >> NES6502_BANKSHIFT;
-         mmc_cpu.mem_page[page] = &mmc.cart->rom[(bank % MMC_16KROM) << 14];
-         mmc_cpu.mem_page[page + 1] = mmc_cpu.mem_page[page] + 0x1000;
-         mmc_cpu.mem_page[page + 2] = mmc_cpu.mem_page[page] + 0x2000;
-         mmc_cpu.mem_page[page + 3] = mmc_cpu.mem_page[page] + 0x3000;
+         int rom_page = (bank % MMC_16KROM) << 2;
+         mmc_cpu.mem_page[page] = rom_prg_page(mmc.cart, rom_page);
+         mmc_cpu.mem_page[page + 1] = rom_prg_page(mmc.cart, rom_page + 1);
+         mmc_cpu.mem_page[page + 2] = rom_prg_page(mmc.cart, rom_page + 2);
+         mmc_cpu.mem_page[page + 3] = rom_prg_page(mmc.cart, rom_page + 3);
       }
       break;
 
@@ -173,14 +175,12 @@ void mmc_bankrom(int size, uint32 address, int bank)
       if (bank == MMC_LASTBANK)
          bank = MMC_LAST32KROM;
 
-      mmc_cpu.mem_page[8] = &mmc.cart->rom[(bank % MMC_32KROM) << 15];
-      mmc_cpu.mem_page[9] = mmc_cpu.mem_page[8] + 0x1000;
-      mmc_cpu.mem_page[10] = mmc_cpu.mem_page[8] + 0x2000;
-      mmc_cpu.mem_page[11] = mmc_cpu.mem_page[8] + 0x3000;
-      mmc_cpu.mem_page[12] = mmc_cpu.mem_page[8] + 0x4000;
-      mmc_cpu.mem_page[13] = mmc_cpu.mem_page[8] + 0x5000;
-      mmc_cpu.mem_page[14] = mmc_cpu.mem_page[8] + 0x6000;
-      mmc_cpu.mem_page[15] = mmc_cpu.mem_page[8] + 0x7000;
+      {
+         int rom_page = (bank % MMC_32KROM) << 3;
+         int page;
+         for (page = 8; page < 16; page++)
+            mmc_cpu.mem_page[page] = rom_prg_page(mmc.cart, rom_page + page - 8);
+      }
       break;
 
    default:

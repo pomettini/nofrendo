@@ -201,6 +201,96 @@ but is materially lighter than Kirby's 29.23 ms / 34.21 FPS worst-case path.
 
 ---
 
+## Rev-A post-spin profile-directed campaign — 2026-07-20
+
+All rows below use the same 2,010-frame PAL Kirby replay on the F746 Rev A. Unless
+noted, the replay completed without skips and the tester reported no graphical or
+audio glitches. The accepted control was repeated immediately to separate real
+regressions from device noise: `padloop` measured 27.83 ms first and 27.86 ms on
+the repeat.
+
+| candidate | avg ms | FPS | decision |
+|---|---:|---:|---|
+| linked + zero-page spin | 29.23 | 34.21 | prior accepted base |
+| copied PRG pages | 29.36 | 34.06 | reject |
+| cache-colored PRG pages | 29.78 | 33.58 | reject |
+| direct 1-bit PPU | 35.42 | 28.23 | reject |
+| compact interpreter | 31.45 | 31.80 | reject |
+| small BG tile cache | 34.31 | 29.15 | reject; D-cache pressure |
+| DTCM code-generation gate | 28.49 | 35.10 | feasibility result, not promoted |
+| STA-abs,Y page-fill fusion | 28.93 | 34.56 | accepted |
+| page-fill + controller serial loop (`padloop`) | **27.83** | **35.93** | **accepted** |
+| residual RAM/PPU copy loops | 32.99 | 30.31 | reject |
+| native DTCM page-fill block | 29.15 | 34.31 | reject; boundary cost |
+| cartridge-RAM shortcut, two layouts | 29.09 / 29.07 | 34.38 / 34.40 | reject |
+| cached-operand JMP indirect | 28.11 | 35.58 | reject |
+| packed ARM background pair | 28.50 | 35.08 | reject |
+
+The semantic page-fill path executed 3,332 batches / 117,984 iterations. The
+controller path executed 7,966 batches / 62,377 reads (2,530 nonzero). Those two
+specializations are promoted in `FAST_FLAGS`. The residual PC profile and the
+failed interpreter-layout variants show that adding even small generic branches
+or tail code can erase a local saving on the F746. Subsequent work therefore stays
+outside the interpreter and must preserve its linked address/size exactly.
+
+The packed-background result is a measured 0.64 ms / 2.3% regression against the
+27.86 ms repeated control. Parallel-byte palette selection reduced indexed loads
+but increased total work and/or D-cache traffic. Leave `PPU_BG_PACKED_PAIR` off.
+The next candidate, `PPU_BG_QUAD_FAST`, retains the accepted pixel renderer and
+only folds two aligned tile-pair iterations into one four-tile attribute group.
+
+The four-tile candidate is **rejected — catastrophic LTO/layout regression**. It
+completed the replay without skips, but measured 70,336 ms total, 34.99 ms average,
+52 ms worst, 1,995 slow frames, and 28.58 FPS. That is 7.13 ms / 25.6% slower than
+the repeated `padloop` control. Static inspection predicted the problem before the
+run: merely changing the whole-program PPU IR caused GCC LTO to inline
+`mem_readbyte`, grow `mem_writebyte` from 0xA8 to 0xB4, move
+`nes6502_execute` from 0x160 to 0xC0, and grow it from 0x2ED0 to 0x2F4C. Scoping
+the feature definition to only `nes_ppu.c` and `main.c` did not prevent the global
+LTO repartition. Leave `PPU_BG_QUAD_FAST` off and do not retry PPU source-shape
+changes unless the accepted interpreter layout is preserved first.
+
+The exact `padloop` package was restored after that failure and immediately
+confirmed again at 55,958 ms total, **27.84 ms average**, 41 ms worst, 1,835
+slow frames, and 35.92 FPS. Its page-fill and controller counters remained
+bit-for-bit stable, establishing a three-run 27.83/27.86/27.84 ms control band.
+
+Next structural milestone: `NES6502_DTCM_LOOKUP_BLOCK` folds the profiled fixed-
+bank routine beginning at `$F756` into one uncached-DTCM call. The residual PC
+profile saw each instruction in this routine 17,545 times. The candidate still
+executes the first `LDA zp` normally, then requires at least 48 cycles remaining
+and matches all 31 subsequent ROM bytes before entering native code. It preserves
+the routine's three conditional exits, memory reads, page-cross cycles, stack
+effects, flags, and RTS target; every mismatch uses the interpreter unchanged.
+The copied Thumb template is 168 bytes, contains no external relocations or
+PC-relative data, and makes its two possible memory reads through a supplied
+function pointer. Test label: `0.4-bench-kirby-dtcmlookup`. Keep only if
+`native_calls` is nonzero, the exact replay stays synchronized and glitch-free,
+and average time beats the 27.84 ms control.
+
+Device result: **REJECTED — native boundary remains too expensive.** The block
+activated 17,066 times and the exact replay completed, proving the matcher,
+relocated code, cycle accounting, stack/flag state, and interpreter fallback all
+worked. Nevertheless it measured 59,046 ms total, 29.38 ms average, 44 ms worst,
+1,877 slow frames, and 34.04 FPS: **+1.54 ms / 5.5% slower** than the 27.84 ms
+control. Eliminating roughly seventeen dispatches per entry is insufficient to
+repay state packing/unpacking, two indirect memory calls, DTCM entry/return, and
+the 260-byte interpreter growth. Leave `NES6502_DTCM_LOOKUP_BLOCK` off. Do not
+add more isolated native subroutine blocks with this ABI; a viable native path
+would need to retain CPU state across many blocks and cover a material fraction
+of total execution before returning to the interpreter.
+
+With full-draw micro-optimization routes exhausted, `PD_PLAYBENCH_FIXED_SKIP`
+adds a benchmark-only deterministic draw-one/skip-one cadence on the exact
+accepted core. Unlike Auto, this cadence is independent of wall time, so input
+still advances once per emulated frame and results remain comparable. The
+shipping scheduler is unchanged. Static inspection confirms the complete
+interpreter layout is identical to the 27.84 ms control. Test label:
+`0.4-bench-kirby-fs1`. The practical-playability gate is approximately 1,005
+reported visual skips, a synchronized 2,010-frame replay, no audio/graphical
+faults beyond the expected lower visual refresh, and average emulation work at
+or below the 20 ms PAL budget.
+
 ## Two-tile background renderer probe — 2026-07-14
 
 Hypothesis: for the common mapper path where `ppu.latchfunc == NULL`, background

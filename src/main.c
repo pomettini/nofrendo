@@ -28,11 +28,61 @@ extern void osd_load_settings(void);
 extern const char *osd_get_load_error(void);
 extern void osd_clear_load_error(void);
 
-#if defined(NES6502_TCMHOT_PROBE) || defined(NES6502_TCMHOT_CORE)
+#if defined(NES6502_TCMHOT_PROBE) || defined(NES6502_TCMHOT_CORE) || defined(NES6502_DTCM_CODEGEN_PROBE)
 static void drain_console(void) {
   uint32_t start = pd->system->getCurrentTimeMilliseconds();
   while (pd->system->getCurrentTimeMilliseconds() - start < 150u) {
   }
+}
+#endif
+
+#ifdef NES6502_DTCM_CODEGEN_PROBE
+#define DTCM_CODEGEN_PROBE_DEST 0x20007D00u
+static void run_dtcm_codegen_probe(void) {
+#if defined(TARGET_PLAYDATE)
+  volatile uint16_t *code = (volatile uint16_t *)DTCM_CODEGEN_PROBE_DEST;
+  uint32_t (*probe_fn)(void);
+  uint32_t result;
+
+  pd->system->logToConsole("[dtcm-jit] begin addr=%08x bytes=4", DTCM_CODEGEN_PROBE_DEST);
+  drain_console();
+
+  code[0] = 0x202Au; /* movs r0, #42 */
+  code[1] = 0x4770u; /* bx lr */
+  __asm volatile ("dsb sy\n\t" ::: "memory");
+  pd->system->clearICache();
+  __asm volatile ("dsb sy\n\t" "isb sy\n\t" ::: "memory");
+
+  probe_fn = (uint32_t (*)(void))(DTCM_CODEGEN_PROBE_DEST | 1u);
+  result = probe_fn();
+  pd->system->logToConsole("[dtcm-jit] result=%u expected=42 ok=%u",
+                           result, result == 42u);
+  drain_console();
+#endif
+}
+#endif
+
+#ifdef NES6502_DTCM_PAGEFILL_BLOCK
+static void init_dtcm_pagefill_block(void) {
+  nes6502_dtcm_block_status_t status;
+  nes6502_dtcm_pagefill_init(pd->system->clearICache);
+  nes6502_dtcm_pagefill_get_status(&status);
+  pd->system->logToConsole(
+      "[dtcmblock] ready=%u status=%u src=%08x dest=%08x bytes=%u",
+      (unsigned)status.ready, (unsigned)status.status,
+      (unsigned)status.source, (unsigned)status.dest, (unsigned)status.size);
+}
+#endif
+
+#ifdef NES6502_DTCM_LOOKUP_BLOCK
+static void init_dtcm_lookup_block(void) {
+  nes6502_dtcm_block_status_t status;
+  nes6502_dtcm_lookup_init(pd->system->clearICache);
+  nes6502_dtcm_lookup_get_status(&status);
+  pd->system->logToConsole(
+      "[dtcmlookup] ready=%u status=%u src=%08x dest=%08x bytes=%u",
+      (unsigned)status.ready, (unsigned)status.status,
+      (unsigned)status.source, (unsigned)status.dest, (unsigned)status.size);
 }
 #endif
 
@@ -364,7 +414,43 @@ static const char *bench_find_rom(void) {
 #define BUNDLED_SCRIPT_PATH "nes_kirby_adventure_1_1.txt"
 #define BENCH_TEST_NAME "nes_kirby_adventure_1_1"
 #define BENCH_ROM_NAME "Kirby's Adventure"
-#if defined(NES6502_PAIRPROFILE) && defined(NES6502_LINKED_CORE) && defined(ENABLE_LTO)
+#if defined(PD_PLAYBENCH_FIXED_SKIP)
+#define BENCH_BUILD_LABEL "0.4-bench-kirby-fs1"
+#elif defined(NES6502_PCPROFILE) && defined(NES6502_ZP_BEQ_SPIN)
+#define BENCH_BUILD_LABEL "0.4-bench-kirby-pcprof"
+#elif defined(NES6502_DTCM_LOOKUP_BLOCK) && defined(NES6502_PAD_SERIAL_LOOP)
+#define BENCH_BUILD_LABEL "0.4-bench-kirby-dtcmlookup"
+#elif defined(PPU_BG_QUAD_FAST) && defined(NES6502_PAD_SERIAL_LOOP)
+#define BENCH_BUILD_LABEL "0.4-bench-kirby-bgquad"
+#elif defined(PPU_BG_PACKED_PAIR) && defined(NES6502_PAD_SERIAL_LOOP)
+#define BENCH_BUILD_LABEL "0.4-bench-kirby-bgpack"
+#elif defined(NES6502_FAST_JMP_INDIRECT) && defined(NES6502_PAD_SERIAL_LOOP)
+#define BENCH_BUILD_LABEL "0.4-bench-kirby-fastjmpi"
+#elif defined(NES6502_DIRECT_CART_RAM) && defined(NES6502_PAD_SERIAL_LOOP)
+#define BENCH_BUILD_LABEL "0.4-bench-kirby-cartram2"
+#elif defined(NES6502_DTCM_CODEGEN_PROBE) && defined(NES6502_ZP_BEQ_SPIN)
+#define BENCH_BUILD_LABEL "0.4-bench-kirby-dtcmjitgate"
+#elif defined(PPU_BG_TILE_CACHE_SMALL) && defined(NES6502_ZP_BEQ_SPIN)
+#define BENCH_BUILD_LABEL "0.4-bench-kirby-bgtilecache"
+#elif defined(NES6502_COMPACT_CORE) && defined(NES6502_ZP_BEQ_SPIN)
+#define BENCH_BUILD_LABEL "0.4-bench-kirby-compact"
+#elif defined(PPU_DIRECT_1BIT) && defined(NES6502_ZP_BEQ_SPIN)
+#define BENCH_BUILD_LABEL "0.4-bench-kirby-direct1"
+#elif defined(NES_PRG_CACHE_COLOR) && defined(NES6502_ZP_BEQ_SPIN)
+#define BENCH_BUILD_LABEL "0.4-bench-kirby-prgcolor"
+#elif defined(NES_PRG_PAGE_COPY) && defined(NES6502_ZP_BEQ_SPIN)
+#define BENCH_BUILD_LABEL "0.4-bench-kirby-prgcopy"
+#elif defined(NES6502_DTCM_PAGEFILL_BLOCK) && defined(NES6502_PAD_SERIAL_LOOP)
+#define BENCH_BUILD_LABEL "0.4-bench-kirby-dtcmblock1"
+#elif defined(NES6502_RESIDUAL_COPY_LOOPS) && defined(NES6502_PAD_SERIAL_LOOP)
+#define BENCH_BUILD_LABEL "0.4-bench-kirby-copyloops"
+#elif defined(NES6502_PAD_SERIAL_LOOP) && defined(NES6502_STA_ABSY_PAGEFILL)
+#define BENCH_BUILD_LABEL "0.4-bench-kirby-padloop"
+#elif defined(NES6502_STA_ABSY_PAGEFILL) && defined(NES6502_ZP_BEQ_SPIN)
+#define BENCH_BUILD_LABEL "0.4-bench-kirby-pagefill"
+#elif defined(DIAG_CPU_EXEC_TIMING) && defined(NES6502_ZP_BEQ_SPIN) && defined(NES6502_LINKED_CORE) && defined(ENABLE_LTO)
+#define BENCH_BUILD_LABEL "0.4-bench-kirby-zpspin-attrib"
+#elif defined(NES6502_PAIRPROFILE) && defined(NES6502_LINKED_CORE) && defined(ENABLE_LTO)
 #define BENCH_BUILD_LABEL "0.4-bench-kirby-pairprof"
 #elif defined(NES6502_ZP_BEQ_SPIN) && defined(NES6502_LINKED_CORE) && defined(ENABLE_LTO)
 #define BENCH_BUILD_LABEL "0.4-bench-kirby-lto-linked-zpspin"
@@ -476,6 +562,21 @@ static void bench_run(void) {
 #ifdef NES6502_PAIRPROFILE
   nes6502_pair_profile_reset();
 #endif
+#ifdef NES6502_PCPROFILE
+  nes6502_pc_profile_reset();
+#endif
+#ifdef NES6502_STA_ABSY_PAGEFILL
+  nes6502_pagefill_stats_reset();
+#endif
+#ifdef NES6502_PAD_SERIAL_LOOP
+  nes6502_padloop_stats_reset();
+#endif
+#ifdef NES6502_RESIDUAL_COPY_LOOPS
+  nes6502_copyloop_stats_reset();
+#endif
+#ifdef NES6502_DTCM_LOOKUP_BLOCK
+  nes6502_dtcm_lookup_stats_reset();
+#endif
   pd_playbench_start();
   pd->system->logToConsole("[bench] script started: %s", cfg.test_name);
 }
@@ -551,6 +652,15 @@ int eventHandler(PlaydateAPI *playdate, PDSystemEvent event, uint32_t arg) {
 #endif
 #ifdef NES6502_TCMHOT_PROBE
     run_tcmhot_probe();
+#endif
+#ifdef NES6502_DTCM_CODEGEN_PROBE
+    run_dtcm_codegen_probe();
+#endif
+#ifdef NES6502_DTCM_PAGEFILL_BLOCK
+    init_dtcm_pagefill_block();
+#endif
+#ifdef NES6502_DTCM_LOOKUP_BLOCK
+    init_dtcm_lookup_block();
 #endif
 #if defined(PD_PLAYBENCH_RECORD)
     rec_run();   /* start the selected live-recording workflow */

@@ -136,6 +136,7 @@ extern uint8 *ppu_getpage(int page);
 extern void ppu_reset(int reset_type);
 extern bool ppu_enabled(void);
 extern void ppu_scanline(uint8_t *bmp, int scanline, bool draw_flag);
+extern bool ppu_scanline_direct_rendered(int scanline);
 extern void ppu_endscanline(int scanline);
 extern void ppu_checknmi();
 
