@@ -28,6 +28,7 @@ extern void osd_clear_load_error(void);
 
 #define FAMICRANK_NES_RAM_SIZE 0x0800u
 #define FAMICRANK_SAVE_SIZE    0x2000u
+#define FAMICRANK_REFRESH_RATE 50.0f
 
 void ce_unload_rom(void);
 int eventHandler(PlaydateAPI *playdate, PDSystemEvent event, uint32_t arg);
@@ -141,6 +142,8 @@ void ce_unload_rom(void) {
     main_quit();
   rom_loaded = false;
   playing = false;
+  if (pd)
+    pd->display->setRefreshRate(0.0f);
   save_dirty = false;
   save_size = 0;
   osd_set_frame_skip(-1);
@@ -149,6 +152,12 @@ void ce_unload_rom(void) {
 bool ce_play(void) {
   if (!rom_loaded)
     return false;
+
+  const ce_frontend_settings_t *settings =
+      frontend && frontend->settings ? frontend->settings() : NULL;
+  pd->display->setRefreshRate(settings && settings->turbo
+                                  ? 0.0f
+                                  : FAMICRANK_REFRESH_RATE);
   playing = true;
   if (save_size)
     save_dirty = true; /* Conservative: Nofrendo has no SRAM write barrier. */
@@ -163,18 +172,19 @@ void ce_stop(void) {
     main_quit();
   rom_loaded = false;
   playing = false;
+  if (pd)
+    pd->display->setRefreshRate(0.0f);
 }
 
 int ce_update(void) {
   if (!playing || !rom_loaded)
     return 1;
 
-  /* CrankBoy displays once per host tick. Advancing twice gives the NES its
-     ~60 Hz logic/audio cadence while FamiCrank's Auto policy normally draws
-     one of the two frames, matching CrankBoy's 30 Hz display convention. */
+  /* CrankBoy leaves emucore updates uncapped. ce_play sets the same 50 Hz
+     cadence used by standalone FamiCrank; advancing more than one frame here
+     would make frame-skipped workloads run ahead of real time. */
   osd_update_frame(NULL);
-  osd_update_frame(NULL);
-  return 2;
+  return 1;
 }
 
 void ce_full_redraw(void) {

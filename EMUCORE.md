@@ -57,8 +57,8 @@ loader, so the device payload must use the `.bin` name.
 - CrankBoy input forwarding, with the existing crank Start/Select controls
 - battery-backed 8KB SRAM managed by CrankBoy
 - Auto and fixed frame-skip preferences
-- two NES frames advanced per CrankBoy host tick, matching its 30Hz display
-  model while retaining NES game and audio cadence
+- one NES frame advanced per 50Hz CrankBoy host tick, matching standalone
+  FamiCrank's PAL timing; CrankBoy's global Uncap FPS setting remains supported
 
 Save states are not exposed because this FamiCrank port does not currently
 include Nofrendo's save-state implementation.
