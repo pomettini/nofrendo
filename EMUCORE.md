@@ -55,7 +55,8 @@ loader, so the device payload must use the `.bin` name.
 
 - iNES and NES 2.0 images accepted by the existing Nofrendo loader
 - CrankBoy input forwarding, with the existing crank Start/Select controls
-- battery-backed 8KB SRAM managed by CrankBoy
+- battery-backed 8KB SRAM managed by CrankBoy; it is conservatively persisted
+  on every pause/exit because Nofrendo exposes no SRAM write barrier
 - Auto and fixed frame-skip preferences
 - one NES frame advanced per 50Hz CrankBoy host tick, matching standalone
   FamiCrank's PAL timing; CrankBoy's global Uncap FPS setting remains supported

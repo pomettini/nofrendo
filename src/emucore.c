@@ -36,7 +36,6 @@ int eventHandler(PlaydateAPI *playdate, PDSystemEvent event, uint32_t arg);
 static const ce_frontend_t *frontend = NULL;
 static bool rom_loaded = false;
 static bool playing = false;
-static bool save_dirty = false;
 static size_t save_size = 0;
 static uint8_t save_cache[FAMICRANK_SAVE_SIZE];
 
@@ -99,7 +98,6 @@ bool ce_load_rom(uint8_t *rom, size_t size, const char *system_slug,
 
   memset(save_cache, 0, sizeof(save_cache));
   save_size = ines_save_size(rom, size);
-  save_dirty = false;
   osd_clear_load_error();
   osd_set_external_rom(rom, size);
 
@@ -144,7 +142,6 @@ void ce_unload_rom(void) {
   playing = false;
   if (pd)
     pd->display->setRefreshRate(0.0f);
-  save_dirty = false;
   save_size = 0;
   osd_set_frame_skip(-1);
 }
@@ -159,8 +156,6 @@ bool ce_play(void) {
                                   ? 0.0f
                                   : FAMICRANK_REFRESH_RATE);
   playing = true;
-  if (save_size)
-    save_dirty = true; /* Conservative: Nofrendo has no SRAM write barrier. */
   return true;
 }
 
@@ -199,7 +194,10 @@ size_t ce_get_rom_save_size(const uint8_t *rom, size_t size) {
 /* CrankBoy 2.2.x queries the loaded core through this no-argument spelling. */
 size_t ce_get_save_size(void) { return save_size; }
 
-bool ce_is_save_dirty(void) { return save_dirty && save_size != 0; }
+/* Nofrendo exposes no SRAM write barrier. Report battery-backed SRAM as dirty
+   for the whole loaded session so every CrankBoy pause/exit persists the most
+   recent state instead of only the first save. */
+bool ce_is_save_dirty(void) { return rom_loaded && save_size != 0; }
 
 void ce_save(uint8_t *buffer, size_t size) {
   if (!buffer || size != save_size || !save_size)
@@ -209,7 +207,6 @@ void ce_save(uint8_t *buffer, size_t size) {
     memcpy(buffer, rom->sram, save_size);
   else
     memcpy(buffer, save_cache, save_size);
-  save_dirty = false;
 }
 
 bool ce_load(const uint8_t *buffer, size_t size) {
@@ -219,7 +216,6 @@ bool ce_load(const uint8_t *buffer, size_t size) {
   rominfo_t *rom = active_rom();
   if (rom && rom->sram)
     memcpy(rom->sram, buffer, save_size);
-  save_dirty = false;
   return true;
 }
 
