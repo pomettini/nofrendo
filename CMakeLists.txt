@@ -23,8 +23,14 @@ if (NOT CMAKE_BUILD_TYPE OR CMAKE_BUILD_TYPE STREQUAL "")
     set(CMAKE_BUILD_TYPE "Release" CACHE STRING "" FORCE)
 endif()
 
-set(PLAYDATE_GAME_NAME FamiCrank)
-set(PLAYDATE_GAME_DEVICE FamiCrank)
+option(FAMICRANK_EMUCORE "Build a libcrankemu core for CrankBoy" OFF)
+if (FAMICRANK_EMUCORE)
+    set(PLAYDATE_GAME_NAME FamiCrankCore)
+    set(PLAYDATE_GAME_DEVICE FamiCrankCore)
+else()
+    set(PLAYDATE_GAME_NAME FamiCrank)
+    set(PLAYDATE_GAME_DEVICE FamiCrank)
+endif()
 
 project(${PLAYDATE_GAME_NAME} C ASM)
 
@@ -48,7 +54,6 @@ list(FILTER NOFRENDO_CORE EXCLUDE REGEX ".*/libsnss/.*")
 
 # Platform layer
 set(PLATFORM_SOURCES
-    src/main.c
     src/osd.c
     src/display.c
     src/keyboard.c
@@ -56,8 +61,15 @@ set(PLATFORM_SOURCES
     src/sound.c
     src/stubs.c
     src/diag.c
-    third_party/pd-rom-picker/src/rom_picker.c
 )
+if (FAMICRANK_EMUCORE)
+    list(APPEND PLATFORM_SOURCES src/emucore.c)
+else()
+    list(APPEND PLATFORM_SOURCES
+        src/main.c
+        third_party/pd-rom-picker/src/rom_picker.c
+    )
+endif()
 
 
 # Newlib syscall stubs are only needed on bare-metal device
@@ -178,6 +190,8 @@ set(GAME_INCLUDES
     src/nofrendo/cpu
     third_party/pd-rom-picker/src
     third_party/pd-playbench/src
+    third_party/libcrankemu
+    third_party/pdll
 )
 if (AUDIO)
     list(APPEND GAME_INCLUDES src/nofrendo/sndhrdw)
@@ -187,6 +201,7 @@ string(TIMESTAMP BUILD_TIMESTAMP "%Y-%m-%d %H:%M:%S")
 
 set(GAME_DEFINES
     NDEBUG
+    $<$<BOOL:${FAMICRANK_EMUCORE}>:FAMICRANK_EMUCORE=1>
     $<$<BOOL:${AUDIO}>:AUDIO=1>
     $<$<AND:$<BOOL:${AUDIO}>,$<BOOL:${AUDIO_DIRECT_RING}>>:AUDIO_DIRECT_RING=1>
     $<$<BOOL:${DIAG}>:DIAG=1>

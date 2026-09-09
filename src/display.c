@@ -42,6 +42,16 @@ static uint8_t white4[4][256];
 /* Cached raw frame buffer pointer — stable for the app lifetime */
 static uint8_t *fb_data = NULL;
 
+void vid_force_full_redraw(void) {
+    fb_data = NULL;
+    if (pd && pd->graphics) {
+        uint8_t *frame = pd->graphics->getFrame();
+        if (frame)
+            memset(frame, 0x00, LCD_ROWSIZE * LCD_ROWS);
+        pd->graphics->markUpdatedRows(0, LCD_ROWS - 1);
+    }
+}
+
 static void ensure_framebuffer(void) {
     if (!fb_data) {
         fb_data = pd->graphics->getFrame();

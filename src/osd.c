@@ -20,7 +20,9 @@ extern PlaydateAPI *pd;
 static char configfilename[] = "nofrendo.cfg";
 
 extern void sound_fill_buffer(void);
+#ifndef FAMICRANK_EMUCORE
 extern int app_return_to_picker_if_requested(void);
+#endif
 
 /* User-facing frame skip: Auto adapts between 1 and 2 based on load;
    0..2 are fixed draw intervals (0 draws every frame; N skips N frames
@@ -96,8 +98,16 @@ void osd_set_frame_skip(int skip) {
    check below never passes there, so it falls back to heap. */
 #define DTCM_RAM_DEST  0x20007500u
 #define DTCM_POOL_END  0x200095a8u
+#ifdef FAMICRANK_EMUCORE
+static uint8_t *emucore_dtcm_ram = NULL;
+void osd_set_emucore_dtcm_ram(void *ram) {
+    emucore_dtcm_ram = (uint8_t *)ram;
+}
+#endif
 uint8_t *osd_dtcm_ram_alloc(unsigned int size) {
-#ifdef TARGET_PLAYDATE
+#ifdef FAMICRANK_EMUCORE
+    return size <= 0x800u ? emucore_dtcm_ram : NULL;
+#elif defined(TARGET_PLAYDATE)
     uintptr_t dest = DTCM_RAM_DEST;
     if ((dest + size) > DTCM_POOL_END) {
 #ifdef DIAG
@@ -218,9 +228,11 @@ void osd_load_settings(void) {
         osd_set_show_fps(atoi(p + 8));
 }
 
-static int playdate_update(void *ud) {
+int osd_update_frame(void *ud) {
+#ifndef FAMICRANK_EMUCORE
     if (app_return_to_picker_if_requested())
         return 1;
+#endif
 
 #if defined(PD_PLAYBENCH_ENABLED) && !defined(PD_PLAYBENCH_RECORD)
     /* Benchmark over: the Playdate C SDK has no quit-to-launcher, so we stop
@@ -460,7 +472,9 @@ static int playdate_update(void *ud) {
 }
 
 void osd_start_emulation(void) {
-    pd->system->setUpdateCallback(playdate_update, NULL);
+#ifndef FAMICRANK_EMUCORE
+    pd->system->setUpdateCallback(osd_update_frame, NULL);
+#endif
 }
 
 extern void osd_input_init(void);
@@ -512,7 +526,13 @@ static void osd_sram_path(const char *rom_path, char *out, size_t outsz) {
 }
 
 int osd_load_sram(const char *rom_path, unsigned char *sram, int len) {
-#ifdef PD_PLAYBENCH_FRESH_SRAM
+#if defined(FAMICRANK_EMUCORE)
+    /* CrankBoy supplies save bytes through ce_load after loading the ROM. */
+    (void)rom_path;
+    (void)sram;
+    (void)len;
+    return -1;
+#elif defined(PD_PLAYBENCH_FRESH_SRAM)
     /* Deterministic Kirby record/replay starts from the cart's zero-filled
        battery RAM and must never inherit the player's persistent save. */
     (void)rom_path;
@@ -535,7 +555,13 @@ int osd_load_sram(const char *rom_path, unsigned char *sram, int len) {
 }
 
 int osd_save_sram(const char *rom_path, const unsigned char *sram, int len) {
-#ifdef PD_PLAYBENCH_FRESH_SRAM
+#if defined(FAMICRANK_EMUCORE)
+    /* CrankBoy owns persistence and calls ce_save when appropriate. */
+    (void)rom_path;
+    (void)sram;
+    (void)len;
+    return 0;
+#elif defined(PD_PLAYBENCH_FRESH_SRAM)
     /* Opening the system menu to dump a recording triggers a save flush. Do
        not let a test session overwrite the user's real battery save. */
     (void)rom_path;
@@ -569,6 +595,15 @@ int osd_makesnapname(char *filename, int len) {
 static char *rom_storage = NULL;
 static char *rom_data = NULL;
 static unsigned int rom_size = 0;
+#ifdef FAMICRANK_EMUCORE
+static uint8_t *external_rom = NULL;
+static size_t external_rom_size = 0;
+
+void osd_set_external_rom(uint8_t *rom, size_t size) {
+    external_rom = rom;
+    external_rom_size = size;
+}
+#endif
 
 static void clear_rom_storage(void) {
     free(rom_storage);
@@ -580,6 +615,14 @@ static void clear_rom_storage(void) {
 char *osd_getromdata(const char *name) {
     FileStat stat;
     clear_rom_storage();
+
+#ifdef FAMICRANK_EMUCORE
+    if (external_rom && external_rom_size >= 16) {
+        rom_data = (char *)external_rom;
+        rom_size = (unsigned int)external_rom_size;
+        return rom_data;
+    }
+#endif
 
     if (pd->file->stat(name, &stat) != 0)
         return NULL;
@@ -627,4 +670,8 @@ unsigned int osd_getromsize(void) {
 
 void osd_unloadromdata(void) {
     clear_rom_storage();
+#ifdef FAMICRANK_EMUCORE
+    external_rom = NULL;
+    external_rom_size = 0;
+#endif
 }

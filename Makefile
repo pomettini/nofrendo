@@ -9,6 +9,7 @@ BASE_FLAGS = -DCMAKE_BUILD_TYPE=Release -DENABLE_LTO=OFF -DENABLE_LTO_NO_IPA_CLO
 BASE_FLAGS += -DPPU_BG_PACKED_PAIR=OFF -DPPU_BG_QUAD_FAST=OFF -DNES6502_DTCM_LOOKUP_BLOCK=OFF -DPD_PLAYBENCH_FIXED_SKIP=OFF -DPD_PLAYBENCH_FIXED_SKIP2=OFF -DPD_PLAYBENCH_AUTO_SKIP=OFF
 FAST_FLAGS = $(BASE_FLAGS) -DPPU_FAST_OAMDMA=ON -DNES_CPU_BATCH_SCANLINES=16 -DNES6502_DIRECT_MEMIO=ON -DNES6502_FAST_JMP_ABS=ON -DNES6502_LAZY_CYCLES=ON -DNES6502_FAST_BNE=ON -DNES6502_FAST_BPL=ON -DNES6502_FAST_BEQ=ON -DNES6502_FAST_MEMOPS=ON -DNES_RAM_DTCM=ON -DNES_IRQ_MAPPER_BATCH=ON -DNES_IRQ_MAPPER_BATCH_IRQ_SCOPE=ON -DPPU_BG_PAIR_FAST=ON -DENABLE_LTO=ON -DNES6502_LINKED_CORE=ON -DNES6502_ZP_BEQ_SPIN=ON -DNES6502_STA_ABSY_PAGEFILL=ON -DNES6502_PAD_SERIAL_LOOP=ON
 FLAGS ?= $(FAST_FLAGS)
+EMUCORE_FLAGS = $(FAST_FLAGS) -DFAMICRANK_EMUCORE=ON
 
 .PHONY: bench-kirby-bgpack install-bench-kirby-bgpack bench-kirby-bgquad install-bench-kirby-bgquad bench-kirby-dtcmlookup install-bench-kirby-dtcmlookup bench-kirby-fs1 install-bench-kirby-fs1 bench-kirby-fs2 install-bench-kirby-fs2 bench-kirby-auto install-bench-kirby-auto
 
@@ -19,9 +20,62 @@ PDX_NAME  ?= FamiCrank.pdx
 PDX_DEST  ?= $(PDX_NAME)
 
 .PHONY: all perf device sim clean rebuild install diag-fast install-diag-fast diag-bgpair install-diag-bgpair bench install-bench bench-bgpair install-bench-bgpair bench-kirby-noirqbatch install-bench-kirby-noirqbatch bench-kirby-irqonly install-bench-kirby-irqonly bench-kirby-irqpair install-bench-kirby-irqpair bench-kirby-lto install-bench-kirby-lto bench-kirby-lto-linked install-bench-kirby-lto-linked bench-kirby-lto-fuse install-bench-kirby-lto-fuse bench-kirby-pairprof install-bench-kirby-pairprof bench-kirby-pcprof install-bench-kirby-pcprof bench-kirby-pagefill install-bench-kirby-pagefill bench-kirby-padloop install-bench-kirby-padloop bench-kirby-copyloops install-bench-kirby-copyloops bench-kirby-dtcmblock1 install-bench-kirby-dtcmblock1 bench-kirby-cartram install-bench-kirby-cartram bench-kirby-fastjmpi install-bench-kirby-fastjmpi bench-kirby-lto-f0a5 install-bench-kirby-lto-f0a5 bench-kirby-lto-zpspin install-bench-kirby-lto-zpspin bench-kirby-lto-noclone install-bench-kirby-lto-noclone bench-kirby-attrib install-bench-kirby-attrib bench-kirby-prgcopy install-bench-kirby-prgcopy bench-kirby-prgcolor install-bench-kirby-prgcolor bench-kirby-direct1 install-bench-kirby-direct1 bench-kirby-compact install-bench-kirby-compact bench-kirby-bgtilecache install-bench-kirby-bgtilecache bench-kirby-dtcmjitgate install-bench-kirby-dtcmjitgate bench-kirby-profile install-bench-kirby-profile bench-kirby-base install-bench-kirby-base bench-kirby install-bench-kirby bench-record install-bench-record record-kirby install-record-kirby
+.PHONY: emucore emucore-device emucore-sim emucore-check install-emucore-sim install-emucore-device _push-emucore
 
 # Build device first so pdex.elf lands in Source/ before sim runs pdc.
 all: device sim
+
+# libcrankemu v1 build for CrankBoy. The package is only an intermediate:
+# install pdex.bin as FamiCrank.bin on hardware, or pdex.dylib as
+# FamiCrank.dylib in the simulator's Shared/Emulation/cores directory.
+emucore:
+	$(MAKE) emucore-device
+	$(MAKE) emucore-sim
+
+emucore-device:
+	cmake -B build/emucore-device -DTOOLCHAIN=armgcc -DCMAKE_TOOLCHAIN_FILE=$(TOOLCHAIN) $(EMUCORE_FLAGS)
+	cmake --build build/emucore-device
+	mkdir -p build/emucore
+	cp FamiCrankCore.pdx/pdex.bin build/emucore/FamiCrank.bin
+
+emucore-sim:
+	cmake -B build/emucore-sim $(EMUCORE_FLAGS)
+	cmake --build build/emucore-sim
+	mkdir -p build/emucore
+	@for ext in dylib so dll; do \
+		if test -f "FamiCrankCore.pdx/pdex.$$ext"; then \
+			cp "FamiCrankCore.pdx/pdex.$$ext" "build/emucore/FamiCrank.$$ext"; \
+		fi; \
+	done
+
+emucore-check: emucore-sim
+	$(CC) -std=c11 -Wall -Wextra -Werror -DTARGET_SIMULATOR=1 -DTARGET_EXTENSION=1 \
+		-I$(SDK)/C_API -Ithird_party/libcrankemu -Ithird_party/pdll \
+		tests/emucore_abi_test.c -o build/emucore/emucore_abi_test
+	build/emucore/emucore_abi_test build/emucore/FamiCrank.dylib
+
+install-emucore-sim: emucore-sim
+	mkdir -p $(SDK)/Disk/Shared/Emulation/cores
+	cp build/emucore/FamiCrank.dylib $(SDK)/Disk/Shared/Emulation/cores/
+
+_push-emucore:
+	@test -n "$(PORT)" || (echo "No Playdate device found on /dev/cu.usbmodem*"; exit 1)
+	@echo "Mounting $(PORT)..."
+	$(PDUTIL) $(PORT) datadisk
+	@attempt=0; until mkdir -p "$(VOLUME)/Shared/Emulation/cores" 2>/dev/null; do \
+		disk=$$(diskutil list | awk '$$3 == "PLAYDATE" { print $$NF; exit }'); \
+		if test -n "$$disk"; then diskutil mount "$$disk" >/dev/null 2>&1 || true; fi; \
+		attempt=$$((attempt + 1)); \
+		if test $$attempt -ge 30; then echo "Playdate data disk did not become writable"; exit 1; fi; \
+		sleep 1; \
+	done
+	@echo "Copying FamiCrank.bin to /Shared/Emulation/cores/..."
+	COPYFILE_DISABLE=1 cp build/emucore/FamiCrank.bin $(VOLUME)/Shared/Emulation/cores/FamiCrank.bin
+	sync
+	diskutil eject $(VOLUME)
+	@echo "Done. FamiCrank.bin installed for CrankBoy."
+
+install-emucore-device: emucore-device _push-emucore
 
 perf: all
 
@@ -34,7 +88,7 @@ sim:
 	cmake --build build/sim
 
 clean:
-	rm -rf build FamiCrank.pdx nofrendo.pdx Source/pdex.elf Source/pdex.dylib
+	rm -rf build FamiCrank.pdx FamiCrankCore.pdx nofrendo.pdx Source/pdex.elf Source/pdex.dylib
 
 rebuild:
 	touch src/*.c && $(MAKE) all

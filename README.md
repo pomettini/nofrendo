@@ -38,6 +38,11 @@ Your progress is saved automatically when you switch games or quit the app. Save
 
 - **Frameskip**: `Auto` (default) keeps things as smooth as possible and adjusts on its own. You can also pick a fixed amount if you prefer.
 
+## CrankBoy emucore
+
+FamiCrank can also be built as a libcrankemu core for CrankBoy. See
+[EMUCORE.md](EMUCORE.md) for build, installation, and testing instructions.
+
 ## Credits
 
 - **Nofrendo core**: Matthew Conte (1998–2000).

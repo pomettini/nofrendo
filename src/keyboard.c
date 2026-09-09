@@ -10,6 +10,15 @@
 
 extern PlaydateAPI *pd;
 
+#ifdef FAMICRANK_EMUCORE
+static void (*frontend_get_buttons)(PDButtons *, PDButtons *, PDButtons *) = NULL;
+
+void osd_set_frontend_buttons(
+    void (*get_buttons)(PDButtons *, PDButtons *, PDButtons *)) {
+    frontend_get_buttons = get_buttons;
+}
+#endif
+
 static const struct {
     PDButtons   btn;
     int         evt;
@@ -203,7 +212,14 @@ void osd_getinput(void) {
 #endif
 #else
     PDButtons pushed, released;
+#ifdef FAMICRANK_EMUCORE
+    if (frontend_get_buttons)
+        frontend_get_buttons(NULL, &pushed, &released);
+    else
+        pushed = released = 0;
+#else
     pd->system->getButtonState(NULL, &pushed, &released);
+#endif
 
     for (int i = 0; i < MAP_LEN; i++) {
         if (pushed   & map[i].btn) fire(map[i].evt, INP_STATE_MAKE);
