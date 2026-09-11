@@ -1,5 +1,5 @@
 {
-  "$schema": "https://raw.githubusercontent.com/nstbayless/libcrankemu-cores/main/core.schema.json",
+  "$schema": "https://raw.githubusercontent.com/CrankBoyHQ/libcrankemu-cores/main/core.schema.json",
   "systems": {
     "nes": "Nintendo Entertainment System"
   },
@@ -16,7 +16,7 @@
   "size-download": 90185,
   "href": "https://github.com/pomettini/nofrendo/releases/download/v0.4.0/FamiCrank-emucore.zip",
   "license": "GPLv3",
-  "license-href": "https://raw.githubusercontent.com/pomettini/nofrendo/main/LICENSE",
+  "license-href": "https://raw.githubusercontent.com/pomettini/nofrendo/master/LICENSE",
   "maintainer": "Giorgio Pomettini",
   "genAI": "yes (Claude Code)"
 }
