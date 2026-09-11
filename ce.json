@@ -1,0 +1,22 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nstbayless/libcrankemu-cores/main/core.schema.json",
+  "systems": {
+    "nes": "Nintendo Entertainment System"
+  },
+  "name": "FamiCrank",
+  "version": "v0.4.0",
+  "unzip": {
+    "FamiCrank.bin": "cores/FamiCrank.bin",
+    "LICENSE": "cores/LICENSE_FamiCrank"
+  },
+  "ce-version": 1,
+  "ce-version-min": 1,
+  "description": "NES emulation core for Playdate, based on Nofrendo by Matthew Conte and the NumWorks port by nwagyu, ported to Playdate by Giorgio Pomettini.",
+  "timestamp": "2026-09-11 15:08:17",
+  "size-download": 90185,
+  "href": "https://github.com/pomettini/nofrendo/releases/download/v0.4.0/FamiCrank-emucore.zip",
+  "license": "GPLv3",
+  "license-href": "https://raw.githubusercontent.com/pomettini/nofrendo/main/LICENSE",
+  "maintainer": "Giorgio Pomettini",
+  "genAI": "yes (Claude Code)"
+}
