@@ -11,10 +11,12 @@ The Playdate SDK must be installed and configured in the usual way.
 make emucore
 ```
 
-The ready-to-install files are written to `build/emucore/`:
+The ready-to-install files are:
 
-- `FamiCrank.bin` for Playdate hardware
-- `FamiCrank.dylib` on macOS (`.so` on Linux or `.dll` on Windows)
+- `FamiCrank.bin` in the repository root for Playdate hardware; this release
+  artifact is intentionally tracked so CrankBoy can download it from GitHub
+- `build/emucore/FamiCrank.dylib` on macOS (`.so` on Linux or `.dll` on
+  Windows)
 
 To build and validate the macOS core's pdll handshake and libcrankemu metadata:
 

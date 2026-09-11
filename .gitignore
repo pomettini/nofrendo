@@ -7,6 +7,9 @@ build/
 Source/pdex.elf
 Source/pdex.dylib
 
+# Published CrankBoy hardware core
+!FamiCrank.bin
+
 # CMake
 CMakeCache.txt
 CMakeFiles/

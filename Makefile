@@ -36,7 +36,8 @@ emucore-device:
 	cmake -B build/emucore-device -DTOOLCHAIN=armgcc -DCMAKE_TOOLCHAIN_FILE=$(TOOLCHAIN) $(EMUCORE_FLAGS)
 	cmake --build build/emucore-device
 	mkdir -p build/emucore
-	cp FamiCrankCore.pdx/pdex.bin build/emucore/FamiCrank.bin
+	cp FamiCrankCore.pdx/pdex.bin FamiCrank.bin
+	cp FamiCrank.bin build/emucore/FamiCrank.bin
 
 emucore-sim:
 	cmake -B build/emucore-sim $(EMUCORE_FLAGS)
@@ -70,7 +71,7 @@ _push-emucore:
 		sleep 1; \
 	done
 	@echo "Copying FamiCrank.bin to /Shared/Emulation/cores/..."
-	COPYFILE_DISABLE=1 cp build/emucore/FamiCrank.bin $(VOLUME)/Shared/Emulation/cores/FamiCrank.bin
+	COPYFILE_DISABLE=1 cp FamiCrank.bin $(VOLUME)/Shared/Emulation/cores/FamiCrank.bin
 	sync
 	diskutil eject $(VOLUME)
 	@echo "Done. FamiCrank.bin installed for CrankBoy."
